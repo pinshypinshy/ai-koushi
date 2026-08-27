@@ -1,0 +1,126 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo,
+    system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-slate-100);
+  color: var(--color-slate-800);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Markdown プレビューと講義本文の基本スタイル（§4.1.3） */
+.md > *:first-child {
+  margin-top: 0;
+}
+.md > *:last-child {
+  margin-bottom: 0;
+}
+.md h1 {
+  font-size: 1.35rem;
+  font-weight: 700;
+  margin: 1.4em 0 0.6em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--color-slate-200);
+}
+.md h2 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 1.3em 0 0.5em;
+}
+.md h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 1.2em 0 0.4em;
+}
+.md p {
+  margin: 0.7em 0;
+  line-height: 1.85;
+}
+.md ul,
+.md ol {
+  margin: 0.7em 0;
+  padding-left: 1.4em;
+}
+.md ul {
+  list-style: disc;
+}
+.md ol {
+  list-style: decimal;
+}
+.md li {
+  margin: 0.3em 0;
+  line-height: 1.8;
+}
+.md blockquote {
+  margin: 0.8em 0;
+  padding: 0.1em 0 0.1em 0.9em;
+  border-left: 3px solid var(--color-slate-300);
+  color: var(--color-slate-500);
+}
+.md code {
+  font-size: 0.875em;
+  background: var(--color-slate-100);
+  border: 1px solid var(--color-slate-200);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+.md pre {
+  margin: 0.8em 0;
+  padding: 0.85em 1em;
+  background: var(--color-slate-900);
+  border-radius: 8px;
+  overflow-x: auto; /* §3.3 横スクロールは内側に閉じ込める */
+}
+.md pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-slate-100);
+  font-size: 0.82rem;
+  line-height: 1.7;
+}
+.md table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.9em 0;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+.md th,
+.md td {
+  border: 1px solid var(--color-slate-200);
+  padding: 0.4em 0.7em;
+  text-align: left;
+}
+.md th {
+  background: var(--color-slate-50);
+  font-weight: 700;
+}
+.md a {
+  color: var(--color-indigo-600);
+  text-decoration: underline;
+}
+.md hr {
+  margin: 1.4em 0;
+  border: 0;
+  border-top: 1px solid var(--color-slate-200);
+}
+.md .katex-display {
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.2em 0;
+}
