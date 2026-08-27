@@ -1,9 +1,9 @@
 import { useStore } from '../store'
 import type { Tab } from '../types'
-import { IconChat, IconCheckSquare, IconUpload } from './Icons'
+import { IconChat, IconCheckSquare, IconDoc } from './Icons'
 
-const TABS: { key: Tab; label: string; short: string; Icon: typeof IconUpload }[] = [
-  { key: 'upload', label: 'アップロード', short: '教材', Icon: IconUpload },
+const TABS: { key: Tab; label: string; short: string; Icon: typeof IconDoc }[] = [
+  { key: 'material', label: '教材', short: '教材', Icon: IconDoc },
   { key: 'lecture', label: '講義', short: '講義', Icon: IconChat },
   { key: 'quiz', label: '確認テスト', short: 'テスト', Icon: IconCheckSquare },
 ]

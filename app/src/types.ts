@@ -6,7 +6,7 @@
 export type CourseStatus = 'generating' | 'ready' | 'failed'
 export type GeneratingPhase = 'outline' | 'quiz'
 export type StepStatus = 'not_started' | 'in_progress' | 'completed'
-export type Tab = 'upload' | 'lecture' | 'quiz'
+export type Tab = 'material' | 'lecture' | 'quiz'
 
 export interface Step {
   id: string

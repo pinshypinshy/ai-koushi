@@ -8,7 +8,7 @@ import { useStore, type DevScenario } from '../store'
 const SCENARIOS: { id: string; label: string; name: DevScenario }[] = [
   { id: 'SC-01', label: 'ログイン', name: 'login' },
   { id: 'SC-02', label: '空状態（講義0件）', name: 'empty' },
-  { id: 'SC-03', label: 'アップロード（サンプル投入）', name: 'uploadSample' },
+  { id: 'SC-03', label: '講義作成（サンプル投入）', name: 'createSample' },
   { id: 'SC-04', label: '作成確認ダイアログ', name: 'confirmCreate' },
   { id: 'SC-05', label: '生成中', name: 'generating' },
   { id: 'SC-06', label: '生成失敗', name: 'failed' },
@@ -21,6 +21,7 @@ const SCENARIOS: { id: string; label: string; name: DevScenario }[] = [
   { id: 'SC-13', label: '講義メニュー', name: 'courseMenu' },
   { id: 'SC-14', label: '削除確認ダイアログ', name: 'deleteDialog' },
   { id: 'SC-15', label: 'ユーザーメニュー', name: 'userMenu' },
+  { id: 'SC-16', label: '教材タブ', name: 'materialTab' },
 ]
 
 export function DevPanel() {

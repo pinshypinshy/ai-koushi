@@ -9,7 +9,7 @@ export function EmptyState() {
       <p className="text-base font-semibold text-slate-700">まだ講義がありません</p>
       <p className="mt-2 text-sm text-slate-500">教材をアップロードすると講義が作成されます</p>
       <button
-        onClick={() => dispatch({ type: 'setTab', tab: 'upload' })}
+        onClick={() => dispatch({ type: 'openCreate' })}
         className="mt-8 flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-medium text-white transition hover:bg-slate-700"
       >
         <IconUpload className="h-4 w-4" />

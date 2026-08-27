@@ -1,6 +1,6 @@
 import type { Course, Question, Step } from '../types'
 
-/** アップロードタブの動作確認用サンプル（開発パネルから投入する） */
+/** 講義作成オーバーレイの動作確認用サンプル（開発パネルから投入する） */
 export const SAMPLE_MARKDOWN = `# Git入門
 
 バージョン管理システム Git の基礎を扱う。

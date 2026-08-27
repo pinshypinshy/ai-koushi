@@ -42,7 +42,9 @@ export interface State {
   menu: MenuState
   drawerOpen: boolean
   progressOpen: boolean
-  /** アップロードタブの入力状態 */
+  /** 講義作成オーバーレイ（SC-03）を開いているか */
+  createOpen: boolean
+  /** 講義作成オーバーレイの入力状態 */
   draftTitle: string
   draftMarkdown: string
   /** 直前に追加された assistant メッセージ（ストリーミング演出の対象） */
@@ -72,6 +74,7 @@ export function initialState(): State {
     menu: null,
     drawerOpen: false,
     progressOpen: false,
+    createOpen: false,
     draftTitle: '',
     draftMarkdown: '',
     streamingMessageId: null,
@@ -88,6 +91,8 @@ export type Action =
   | { type: 'openMenu'; menu: MenuState }
   | { type: 'setDrawer'; open: boolean }
   | { type: 'toggleProgress' }
+  | { type: 'openCreate' }
+  | { type: 'closeCreate' }
   | { type: 'createCourse' }
   | { type: 'generationPhase'; courseId: string; phase: 'outline' | 'quiz' }
   | { type: 'generationDone'; courseId: string }
@@ -112,8 +117,9 @@ export type DevScenario =
   | 'empty'
   | 'generating'
   | 'failed'
-  | 'uploadSample'
+  | 'createSample'
   | 'confirmCreate'
+  | 'materialTab'
   | 'deleteDialog'
   | 'courseMenu'
   | 'userMenu'
@@ -171,7 +177,14 @@ export function reducer(s: State, action: Action): State {
     case 'logout':
       return { ...initialState(), authed: false }
     case 'selectCourse':
-      return { ...s, selectedCourseId: action.id, tab: 'lecture', drawerOpen: false, quiz: emptyQuiz }
+      return {
+        ...s,
+        selectedCourseId: action.id,
+        tab: 'lecture',
+        drawerOpen: false,
+        createOpen: false,
+        quiz: emptyQuiz,
+      }
     case 'setTab':
       return { ...s, tab: action.tab, quiz: action.tab === 'quiz' ? { ...emptyQuiz } : s.quiz }
     case 'setDraft':
@@ -188,6 +201,11 @@ export function reducer(s: State, action: Action): State {
       return { ...s, drawerOpen: action.open }
     case 'toggleProgress':
       return { ...s, progressOpen: !s.progressOpen }
+    // 書きかけの入力は破棄せずに復元する（§4.1.5）
+    case 'openCreate':
+      return { ...s, createOpen: true, drawerOpen: false, menu: null }
+    case 'closeCreate':
+      return { ...s, createOpen: false }
 
     case 'createCourse': {
       const id = nid('course')
@@ -210,6 +228,7 @@ export function reducer(s: State, action: Action): State {
         courses: [course, ...s.courses],
         selectedCourseId: id,
         tab: 'lecture',
+        createOpen: false,
         modal: null,
         draftTitle: '',
         draftMarkdown: '',
@@ -446,12 +465,14 @@ function applyScenario(s: State, name: DevScenario): State {
           errorMessage: 'レート制限に達しました。',
         })),
       }
-    case 'uploadSample':
-      return { ...fresh, tab: 'upload', draftTitle: 'Git入門', draftMarkdown: SAMPLE_MARKDOWN }
+    case 'createSample':
+      return { ...fresh, createOpen: true, draftTitle: 'Git入門', draftMarkdown: SAMPLE_MARKDOWN }
+    case 'materialTab':
+      return { ...fresh, tab: 'material', selectedCourseId: gitId }
     case 'confirmCreate':
       return {
         ...fresh,
-        tab: 'upload',
+        createOpen: true,
         draftTitle: 'Git入門',
         draftMarkdown: SAMPLE_MARKDOWN,
         modal: { type: 'confirmCreate', title: 'Git入門', charCount: SAMPLE_MARKDOWN.length },

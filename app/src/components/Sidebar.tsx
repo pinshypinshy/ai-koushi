@@ -27,8 +27,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
       <div className="px-3">
         <button
           onClick={() => {
-            dispatch({ type: 'setTab', tab: 'upload' })
-            dispatch({ type: 'setDraft', title: '', markdown: '' })
+            dispatch({ type: 'openCreate' })
             onClose?.()
           }}
           className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-800"

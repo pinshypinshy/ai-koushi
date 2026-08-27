@@ -12,18 +12,20 @@ import { Modal, DialogButtons, btnDanger, btnGhost, btnPrimary } from './compone
 import { IconMenu, IconUser } from './components/Icons'
 import { Login } from './screens/Login'
 import { EmptyState } from './screens/EmptyState'
-import { UploadTab } from './screens/UploadTab'
+import { CreateOverlay } from './screens/CreateOverlay'
 import { Generating } from './screens/Generating'
 import { GenerateFailed } from './screens/GenerateFailed'
 import { LectureTab } from './screens/LectureTab'
+import { MaterialTab } from './screens/MaterialTab'
 import { QuizTab } from './screens/QuizTab'
 
 function Content() {
   const { state } = useStore()
   const course = useCurrentCourse()
 
-  if (state.tab === 'upload') return <UploadTab />
   if (!course) return <EmptyState />
+  // 教材は作成時に保存済みのため、生成中・失敗中でも閲覧できる（§4.4）
+  if (state.tab === 'material') return <MaterialTab course={course} />
   if (course.status === 'generating') return <Generating course={course} />
   if (course.status === 'failed') return <GenerateFailed course={course} />
   if (state.tab === 'quiz') return <QuizTab course={course} />
@@ -173,7 +175,7 @@ function Shell() {
 
   if (isMobile) {
     return (
-      <div className="flex h-full flex-col bg-slate-100">
+      <div className="relative flex h-full flex-col bg-slate-100">
         <header className="flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-3 py-2.5">
           <button
             onClick={() => dispatch({ type: 'setDrawer', open: true })}
@@ -220,6 +222,9 @@ function Shell() {
           </div>
         )}
 
+        {/* SC-03 講義作成オーバーレイ（§4.1）。タブバーごと覆う */}
+        {state.createOpen && <CreateOverlay />}
+
         <Dialogs />
         <DevPanel />
       </div>
@@ -232,7 +237,7 @@ function Shell() {
         <Sidebar />
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="relative flex min-w-0 flex-1 flex-col">
         <div className="shrink-0">
           <TabBar variant="desktop" />
         </div>
@@ -249,6 +254,9 @@ function Shell() {
         </div>
 
         {showLectureChrome && <PromptInput disabled={course.currentStepId === null} />}
+
+        {/* SC-03 講義作成オーバーレイ（§4.1）。サイドバーは残し、タブバーとメイン領域を覆う */}
+        {state.createOpen && <CreateOverlay />}
       </div>
 
       <Dialogs />
