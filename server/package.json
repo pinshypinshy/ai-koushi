@@ -1,0 +1,23 @@
+{
+  "name": "server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "db:create": "wrangler d1 create ai-koushi",
+    "db:migrate": "wrangler d1 migrations apply ai-koushi --local",
+    "db:migrate:remote": "wrangler d1 migrations apply ai-koushi --remote"
+  },
+  "dependencies": {
+    "@google/genai": "^2.19.0",
+    "@hono/oauth-providers": "^0.9.0",
+    "hono": "^4.13.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260827.1",
+    "typescript": "~6.0.2",
+    "wrangler": "^4.127.0"
+  }
+}

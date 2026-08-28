@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ai-koushi",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-27",
+  // @google/genai が Node 互換 API を参照するため（Q-22 の検証対象）
+  "compatibility_flags": ["nodejs_compat"],
+
+  // §8.4 ログ要件。Workers Observability を有効にする
+  "observability": { "enabled": true },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ai-koushi",
+      // `npm run db:create` の出力を貼る。ローカル開発だけなら仮の値でも動く
+      "database_id": "PLACEHOLDER_RUN_DB_CREATE",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // 秘密でない設定値。秘密は .dev.vars（ローカル）と wrangler secret（本番）に置く
+  "vars": {
+    "APP_ORIGIN": "http://localhost:5173",
+    "MODEL_OUTLINE": "gemini-3.1-pro-preview",
+    "MODEL_QUIZ": "gemini-3.1-pro-preview",
+    "MODEL_LECTURE": "gemini-3.7-flash",
+    "MODEL_ANSWER": "gemini-3.7-flash",
+    "MODEL_SUMMARY": "gemini-3.7-flash"
+  }
+}

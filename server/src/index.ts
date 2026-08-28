@@ -1,0 +1,37 @@
+import { Hono } from 'hono'
+import { HTTPException } from 'hono/http-exception'
+import type { AppEnv } from './env'
+import { auth } from './auth/routes'
+import { requireUser } from './auth/session'
+import { courses } from './routes/courses'
+import { dev } from './routes/dev'
+
+const app = new Hono<AppEnv>()
+
+/** 疎通確認用。DB へは触れない */
+app.get('/api/health', (c) => c.json({ ok: true }))
+
+app.route('/auth', auth)
+
+/** ログイン状態の確認。フロントは起動時にこれを見て SC-01 か本体かを決める */
+app.get('/api/me', requireUser, (c) => c.json(c.get('user')))
+
+app.route('/api', courses)
+
+// 開発用。製品には含めない（§3「画面一覧」の DevPanel と同じ位置づけ）
+app.route('/api/dev', dev)
+
+app.notFound((c) => c.json({ error: 'not_found', message: 'エンドポイントが存在しません' }, 404))
+
+app.onError((err, c) => {
+  // §8.4：エラーは Workers Observability のログに残す
+  console.error('unhandled', err)
+  // ライブラリが投げる HTTPException（OAuth の state 不一致など）は
+  // 自身のステータスを持っているため、500 に塗り潰さない
+  if (err instanceof HTTPException) {
+    return c.json({ error: 'request_failed', message: err.message }, err.status)
+  }
+  return c.json({ error: 'internal', message: 'サーバー側でエラーが発生しました' }, 500)
+})
+
+export default app

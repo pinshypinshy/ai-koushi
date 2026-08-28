@@ -1,0 +1,103 @@
+/**
+ * フロントエンド（app/）とサーバー（server/）で共有する API の型。
+ * DB の行そのものではなく、クライアントへ返す表現を定義する。
+ *
+ * app/src/types.ts はモック UI 用の型であり、当面は別物として併存させる。
+ * 実 API への差し替えが済んだ時点で、そちらをここへ寄せる。
+ */
+
+export type CourseStatus = 'generating' | 'ready' | 'failed'
+export type GeneratingPhase = 'outline' | 'quiz'
+export type StepStatus = 'not_started' | 'in_progress' | 'completed'
+export type MessageRole = 'user' | 'assistant'
+
+export interface ApiUser {
+  id: string
+  email: string
+  displayName: string
+}
+
+/** サイドバー（A-3）の1行。教材原文は含めない（§6.4 講義一覧は軽量に保つ） */
+export interface CourseSummary {
+  id: string
+  title: string
+  status: CourseStatus
+  phase: GeneratingPhase | null
+  errorMessage: string | null
+  totalSteps: number
+  completedSteps: number
+  updatedAt: number
+}
+
+export interface ApiStep {
+  id: string
+  orderIndex: number
+  title: string
+  objective: string
+  keyPoints: string[]
+  sourceRef: string | null
+  status: StepStatus
+  completedAt: number | null
+}
+
+export interface ApiMessage {
+  id: string
+  stepId: string
+  role: MessageRole
+  content: string
+  createdAt: number
+}
+
+/** 選択中の講義。講義タブの描画に必要な分だけを持つ */
+export interface CourseDetail extends CourseSummary {
+  currentStepId: string | null
+  steps: ApiStep[]
+  messages: ApiMessage[]
+}
+
+/** 教材タブ（§4.4）。原文は最大240KB になるため個別に取得する */
+export interface MaterialResponse {
+  courseId: string
+  title: string
+  charCount: number
+  rawMarkdown: string
+}
+
+/**
+ * 出題時に返す設問。
+ * is_correct と explanation を含めないのは、正解がクライアントに渡ると
+ * 「回答する」押下前に判明してしまい、§4.3.2 の判定が成立しないため。
+ */
+export interface ApiChoice {
+  id: string
+  body: string
+}
+
+export interface ApiQuestion {
+  id: string
+  stem: string
+  choices: ApiChoice[]
+  coveredStepIds: string[]
+}
+
+/** 解答の判定結果。正誤と解説はここで初めてクライアントへ渡る */
+export interface AttemptResult {
+  questionId: string
+  selectedChoiceId: string
+  correctChoiceId: string
+  isCorrect: boolean
+  explanation: string
+  answeredAt: number
+}
+
+/** §6.4「初回ロード」。講義一覧・選択中講義・ユーザーを1往復で返す */
+export interface BootstrapResponse {
+  user: ApiUser
+  courses: CourseSummary[]
+  selected: CourseDetail | null
+}
+
+export interface ApiError {
+  error: string
+  message: string
+}
