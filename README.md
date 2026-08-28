@@ -9,17 +9,20 @@
 
 ## 現在の状態
 
-**UI モックの段階。** 全画面が実装され、モックデータ上で一通り操作できるが、
-AI 呼び出し・データベース・認証はいずれも未実装。リロードすると初期状態に戻る。
+**フロントエンドとサーバーが、それぞれ独立して動く段階。** 画面はモックデータ上で
+一通り操作でき、サーバー側は認証と AI 呼び出しまで実装済みだが、両者はまだ接続していない。
+そのため、画面から見える挙動は現時点でもモックのままである。
 
 | 領域 | 状態 |
 |---|---|
-| 画面（全20画面） | 実装済み |
+| 画面（全20画面） | 実装済み（モックデータ） |
 | 画面遷移・状態管理 | 実装済み（モックデータ） |
 | Markdown・数式（KaTeX）描画 | 実装済み |
-| Gemini API 呼び出し | 未実装 |
-| Cloudflare D1 / Workflows | 未実装 |
-| Google サインイン | 未実装（ボタンを押すと画面が切り替わるだけ） |
+| Cloudflare D1 のスキーマ | 実装済み |
+| Google サインイン | 実装済み |
+| AI 呼び出し層（Gemini） | 実装済み。実通信で確認したのはステップ要約のみ |
+| 講義作成ジョブ（Cloudflare Workflows） | 未着手 |
+| フロントエンドとサーバーの接続 | 未着手 |
 
 ## 主な機能
 
@@ -43,39 +46,74 @@ AI 呼び出し・データベース・認証はいずれも未実装。リロ�
 | フロントエンド | React SPA（CSR）＋ Vite ＋ TypeScript ＋ Tailwind CSS |
 | 長時間ジョブ | Cloudflare Workflows |
 | DB | Cloudflare D1（SQLite） |
-| AI | Gemini API（3.1 Pro / 3.7 Flash）＋ APIキー |
+| AI | Gemini API（3.1 Pro preview / 3.7 Flash）＋ APIキー |
 
 Cloudflare を選んだ理由は、**HTTP リクエストの実行時間に上限がなく、AI の応答待ちが
 制約にならない**ため。制限されるのは CPU 時間で、`fetch()` の待機時間はそこに算入されない。
 詳細は [REQUIREMENTS.md](REQUIREMENTS.md) §7.2 を参照。
 
-Gemini を選んだ理由は、本アプリのコストが「教材10万トークンを毎ターン読む」部分に
+Gemini を選んだ理由は、本アプリのコストが「教材全文を毎ターン読む」部分に
 支配されており、**キャッシュの読み取り・書き込み単価がそのまま総額を決める**ため。
-講義1件あたり約 $0.9 で、Claude 構成の約 $4.5 に対して1/5に収まる。
+講義1件あたり約 $0.5 で、Claude 構成に対しておよそ1/5に収まる。
 他社との比較は §11.3.1 を参照。
 
-現時点で実装されているのはフロントエンド部分のみ。
+Pro 系で実在するモデルは `gemini-3.1-pro-preview` のみである（2026-08-27 時点）。
+preview は予告なく変わりうるため、モデルIDは設定値として `server/wrangler.jsonc` に外出ししている。
 
 ## 開発
 
 Node.js は `.node-version` で固定している（22.20.0）。
+
+### 初回のみ
+
+依存をそれぞれインストールする。
 
 ```bash
 cd app && npm install
 ```
 
 ```bash
-npm run dev
+cd server && npm install
 ```
 
-`http://localhost:5173` で起動する。
+ローカルの D1 にマイグレーションを適用する。
 
-| コマンド | 内容 |
-|---|---|
-| `npm run dev` | 開発サーバー |
-| `npm run build` | 型チェックと本番ビルド |
-| `npm run lint` | ESLint |
-| `npm run preview` | ビルド結果の確認 |
+```bash
+cd server && npm run db:migrate
+```
+
+サーバーのシークレットは `server/.dev.vars` に置く（git 管理外）。雛形が用意してあるので、
+`GOOGLE_CLIENT_ID`・`GOOGLE_CLIENT_SECRET`・`SESSION_SECRET`・`GEMINI_API_KEY` を埋める。
+`SESSION_SECRET` は `openssl rand -base64 32` の出力でよい。
+
+Google OAuth のクライアントには、承認済みリダイレクト URI として
+`http://localhost:5173/auth/callback` と `http://localhost:8787/auth/callback` を登録しておく。
+
+### 起動
+
+2プロセスを並行して動かす。
+
+```bash
+cd server && npm run dev
+```
+
+```bash
+cd app && npm run dev
+```
+
+ブラウザからは `http://localhost:5173` だけを使う。`/api` と `/auth` は Vite の proxy が
+`http://localhost:8787` のサーバーへ転送するため、フロントとサーバーが同一オリジンに揃う。
+
+| コマンド | 場所 | 内容 |
+|---|---|---|
+| `npm run dev` | app / server | 開発サーバー |
+| `npm run build` | app | 型チェックと本番ビルド |
+| `npm run lint` | app | ESLint |
+| `npm run typecheck` | server | 型チェック |
+| `npm run db:migrate` | server | ローカル D1 へマイグレーション適用 |
+
+リモートの D1 作成（`npm run db:create`）とデプロイには Cloudflare アカウントと
+`wrangler login` が必要になる。ローカル開発だけなら不要。
 
 ### 画面の確認
 
@@ -93,17 +131,30 @@ ai-koushi/
 ├── .node-version        Node のバージョン固定
 ├── .claude/
 │   └── launch.json      開発サーバーの起動設定
-└── app/
+├── shared/
+│   └── api.ts           app と server で共有する API の型
+├── app/
+│   └── src/
+│       ├── types.ts         画面が使うデータモデルの型定義
+│       ├── store.ts         状態とロジック（reducer）
+│       ├── StoreProvider.tsx
+│       ├── mock/            モック教材・講義台本・設問
+│       ├── hooks/           useMediaQuery / useKeyboardOpen
+│       ├── components/      Sidebar, TabBar, ProgressPanel, PromptInput,
+│       │                    Modal, Markdown, DevPanel, Icons
+│       └── screens/         Login, EmptyState, CreateOverlay, Generating,
+│                            GenerateFailed, MaterialTab, LectureTab, QuizTab
+└── server/
+    ├── wrangler.jsonc       D1 バインディング・モデルID・環境変数
+    ├── .dev.vars            ローカル用シークレット（git 管理外）
+    ├── migrations/          D1 のマイグレーション
     └── src/
-        ├── types.ts         データモデルの型定義
-        ├── store.ts         状態とロジック（reducer）
-        ├── StoreProvider.tsx
-        ├── mock/            モック教材・講義台本・設問
-        ├── hooks/           useMediaQuery / useKeyboardOpen
-        ├── components/      Sidebar, TabBar, ProgressPanel, PromptInput,
-        │                    Modal, Markdown, DevPanel, Icons
-        └── screens/         Login, EmptyState, CreateOverlay, Generating,
-                             GenerateFailed, MaterialTab, LectureTab, QuizTab
+        ├── index.ts         Hono のエントリとルーティング
+        ├── env.ts           バインディングと環境変数の型
+        ├── auth/            セッション、Google OAuth、許可リスト
+        ├── db/              クエリ、ユーザー、キャッシュ参照
+        ├── ai/              AI 呼び出し層（インターフェースと Gemini 実装）
+        └── routes/          講義・教材のエンドポイント、開発用の確認
 ```
 
 ## 要件定義書
