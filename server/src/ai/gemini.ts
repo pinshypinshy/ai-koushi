@@ -70,6 +70,8 @@ export class GeminiClient implements AiClient {
       cachedInputTokens: u?.cachedContentTokenCount ?? 0,
       // 思考トークンは課金上は出力として扱われるため合算する
       outputTokens: (u?.candidatesTokenCount ?? 0) + (u?.thoughtsTokenCount ?? 0),
+      // 上の内数。切り分けのために別途保持する（§5.5）
+      thinkingTokens: u?.thoughtsTokenCount ?? 0,
       durationMs: Date.now() - startedAt,
       error,
     })

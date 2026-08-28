@@ -56,8 +56,8 @@ export async function recordUsage(
     .prepare(
       `INSERT INTO ai_usage_logs
        (id, user_id, course_id, purpose, model, input_tokens, cached_input_tokens,
-        output_tokens, estimated_cost_usd, duration_ms, error, created_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`,
+        output_tokens, thinking_tokens, estimated_cost_usd, duration_ms, error, created_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)`,
     )
     .bind(
       crypto.randomUUID(),
@@ -68,6 +68,7 @@ export async function recordUsage(
       usage.inputTokens,
       usage.cachedInputTokens,
       usage.outputTokens,
+      usage.thinkingTokens,
       estimateCostUsd(usage),
       usage.durationMs,
       usage.error ?? null,

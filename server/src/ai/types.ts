@@ -78,6 +78,12 @@ export interface UsageRecord {
   cachedInputTokens: number
   /** 思考トークンを含む。課金上は出力として扱われるため合算する */
   outputTokens: number
+  /**
+   * outputTokens の内数としての思考トークン（§5.5）。
+   * コストの主因が思考か本文出力かを切り分けるためだけに持つ。
+   * 課金額は outputTokens 側で決まるので、単価計算ではこの値を使わない。
+   */
+  thinkingTokens: number
   durationMs: number
   error?: string
 }

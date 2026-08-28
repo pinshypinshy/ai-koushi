@@ -50,7 +50,7 @@ export const QUIZ_SCHEMA: Schema = {
           covered_steps: {
             type: Type.ARRAY,
             items: { type: Type.INTEGER },
-            description: '関連するステップの order_index。複数なら横断設問',
+            description: '関連するステップの order_index。1始まりで、0は使わない。複数なら横断設問',
           },
         },
         required: ['stem', 'choices', 'correct_index', 'explanation', 'covered_steps'],

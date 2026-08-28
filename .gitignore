@@ -6,3 +6,6 @@ node_modules
 .dev.vars
 .dev.vars.*
 .wrangler
+
+# ①②の検証に使う参考書の原文。他者の著作物を含みうるため追跡しない
+fixtures/
