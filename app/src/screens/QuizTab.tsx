@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react'
+import { ApiFailure, api } from '../api'
 import { latestAttempt, useStore, wrongQuestions } from '../store'
 import type { Course, Question } from '../types'
-import { Markdown } from '../components/Markdown'
+import { InlineMarkdown, Markdown } from '../components/Markdown'
 import { IconCheck, IconX } from '../components/Icons'
 
 const LABELS = ['A', 'B', 'C', 'D']
@@ -112,8 +114,23 @@ function StartView({ course }: { course: Course }) {
 /** SC-09 出題中 ／ SC-10 正誤と解説 */
 function QuestionView({ course, question }: { course: Course; question: Question }) {
   const { state, dispatch } = useStore()
-  const { index, order, selectedChoiceId, revealed, reviewMode } = state.quiz
+  const { index, order, selectedChoiceId, result, grading, reviewMode } = state.quiz
+  const [error, setError] = useState<string | null>(null)
   const isLast = index >= order.length - 1
+  // 正誤と解説は採点の応答で初めて渡される（§4.3.2）
+  const revealed = result !== null
+
+  async function grade() {
+    if (!selectedChoiceId || grading) return
+    setError(null)
+    dispatch({ type: 'gradingStarted' })
+    try {
+      dispatch({ type: 'attemptRecorded', result: await api.attempt(question.id, selectedChoiceId) })
+    } catch (err) {
+      dispatch({ type: 'gradingFailed' })
+      setError(err instanceof ApiFailure ? err.message : '採点できませんでした')
+    }
+  }
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-6">
@@ -139,8 +156,8 @@ function QuestionView({ course, question }: { course: Course; question: Question
       <ul className="space-y-2">
         {question.choices.map((c, i) => {
           const selected = c.id === selectedChoiceId
-          const showCorrect = revealed && c.isCorrect
-          const showWrong = revealed && selected && !c.isCorrect
+          const showCorrect = revealed && c.id === result.correctChoiceId
+          const showWrong = revealed && selected && c.id !== result.correctChoiceId
           return (
             <li key={c.id}>
               <button
@@ -169,7 +186,9 @@ function QuestionView({ course, question }: { course: Course; question: Question
                 >
                   {showCorrect ? <IconCheck className="h-3.5 w-3.5" /> : showWrong ? <IconX className="h-3.5 w-3.5" /> : LABELS[i]}
                 </span>
-                <span className="min-w-0 flex-1 leading-relaxed text-slate-800">{c.body}</span>
+                <span className="min-w-0 flex-1 leading-relaxed text-slate-800">
+                  <InlineMarkdown>{c.body}</InlineMarkdown>
+                </span>
                 {revealed && (showCorrect || showWrong) && (
                   <span
                     className={`shrink-0 self-center text-[11px] font-medium ${
@@ -189,7 +208,7 @@ function QuestionView({ course, question }: { course: Course; question: Question
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
           <p className="mb-2 text-xs font-bold text-slate-500">解説</p>
           <div className="text-sm leading-relaxed text-slate-700">
-            <Markdown>{question.explanation}</Markdown>
+            <Markdown>{result.explanation}</Markdown>
           </div>
           <p className="mt-3 border-t border-slate-200 pt-3 text-[11px] text-slate-400">
             関連ステップ：
@@ -201,6 +220,8 @@ function QuestionView({ course, question }: { course: Course; question: Question
         </div>
       )}
 
+      {error && <p className="text-right text-sm text-rose-600">{error}</p>}
+
       <div className="flex justify-end">
         {revealed ? (
           <button
@@ -211,11 +232,11 @@ function QuestionView({ course, question }: { course: Course; question: Question
           </button>
         ) : (
           <button
-            onClick={() => dispatch({ type: 'reveal' })}
-            disabled={!selectedChoiceId}
+            onClick={() => void grade()}
+            disabled={!selectedChoiceId || grading}
             className="rounded-xl bg-slate-900 px-6 py-2.5 text-sm font-medium text-white transition hover:bg-slate-700 disabled:bg-slate-200 disabled:text-slate-400"
           >
-            回答する
+            {grading ? '採点しています…' : '回答する'}
           </button>
         )}
       </div>
@@ -275,7 +296,9 @@ function ResultView({ course }: { course: Course }) {
                 className="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm"
               >
                 <IconX className="mt-0.5 h-4 w-4 shrink-0 text-rose-500" />
-                <span className="min-w-0 flex-1 text-slate-700">{q.stem}</span>
+                <span className="min-w-0 flex-1 text-slate-700">
+                  <InlineMarkdown>{q.stem}</InlineMarkdown>
+                </span>
               </li>
             ))}
           </ul>
@@ -308,8 +331,50 @@ function ResultView({ course }: { course: Course }) {
 }
 
 export function QuizTab({ course }: { course: Course }) {
-  const { state } = useStore()
+  const { state, dispatch } = useStore()
   const { phase, order, index } = state.quiz
+  const loaded = course.quizLoaded === true
+
+  /**
+   * 設問と、設問ごとの最新の解答を取得する（§4.3）。
+   * 解答記録をサーバーから受け取るのは、再訪時にも復習モードの対象を復元するため。
+   */
+  useEffect(() => {
+    if (loaded) return
+    let alive = true
+    api
+      .quiz(course.id)
+      .then((res) => {
+        if (!alive) return
+        dispatch({
+          type: 'quizLoaded',
+          courseId: course.id,
+          questions: res.questions,
+          attempts: res.latestAttempts,
+        })
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [course.id, loaded, dispatch])
+
+  // §4.1.6：テストだけ失敗した講義は、講義本体は利用できる
+  if (course.quizStatus === 'failed') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+        <p className="text-base font-semibold text-slate-800">確認テストの生成に失敗しました</p>
+        <p className="mt-2 text-sm text-slate-500">講義はそのまま受講できます。</p>
+      </div>
+    )
+  }
+  if (!loaded) {
+    return (
+      <div className="flex h-full items-center justify-center px-6">
+        <p className="text-sm text-slate-400">確認テストを読み込んでいます…</p>
+      </div>
+    )
+  }
 
   if (phase === 'start') return <StartView course={course} />
   if (phase === 'result') return <ResultView course={course} />

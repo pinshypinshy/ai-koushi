@@ -15,8 +15,7 @@ export function GenerateFailed({ course }: { course: Course }) {
     setRetrying(true)
     setRetryError(null)
     try {
-      // 開発パネルのモック講義はサーバーに存在しないため、状態だけを進める
-      if (!course.isMock) await api.retryCourse(course.id)
+      await api.retryCourse(course.id)
       dispatch({ type: 'retryGeneration', courseId: course.id })
     } catch (err) {
       setRetryError(err instanceof ApiFailure ? err.message : '再試行を開始できませんでした')

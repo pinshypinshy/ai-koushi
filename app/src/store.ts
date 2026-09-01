@@ -1,9 +1,6 @@
 import { createContext, useContext, type Dispatch } from 'react'
-import type { Attempt, Course, Question, Tab, User } from './types'
-import { SAMPLE_MARKDOWN, createInitialCourses } from './mock/data'
-
-/** 開発パネル（画面一覧）が投入するモック用の利用者。実データではサーバーの値を使う */
-export const MOCK_USER: User = { name: '平石悠生', email: 'hrisyklit@gmail.com' }
+import type { AttemptResult } from '../../shared/api'
+import type { Attempt, Course, Message, Question, Tab, User } from './types'
 
 /** 教材の文字数制約（§4.1.2） */
 export const MIN_CHARS = 500
@@ -16,7 +13,13 @@ export interface QuizState {
   order: string[]
   index: number
   selectedChoiceId: string | null
-  revealed: boolean
+  /**
+   * 採点結果（§4.3.2）。null なら未回答。
+   * 正誤・正解・解説はサーバーの採点で初めて渡されるため、出題側は持っていない。
+   */
+  result: AttemptResult | null
+  /** 採点の通信中。二重送信を防ぐ */
+  grading: boolean
   reviewMode: boolean
   /** 開始画面で選択中の絞り込みステップ id */
   stepFilter: string[]
@@ -32,6 +35,12 @@ export type MenuState =
   /** renaming は SC-13 の「名前を変更」を選んだ後の状態（その場で編集可能にする） */
   | { type: 'course'; courseId: string; renaming?: boolean }
   | { type: 'user' }
+
+/** 受信中の発話（§8.1）。届いた文字をそのまま積み、完了時に messages へ移す */
+export interface StreamingState {
+  stepId: string
+  text: string
+}
 
 export interface State {
   authed: boolean
@@ -52,10 +61,11 @@ export interface State {
   /** 講義作成オーバーレイの入力状態 */
   draftTitle: string
   draftMarkdown: string
-  /** 直前に追加された assistant メッセージ（ストリーミング演出の対象） */
-  streamingMessageId: string | null
   /** 講義作成の要求がサーバーに拒否されたときの文言（文字数・月間上限など） */
   createError: string | null
+  streaming: StreamingState | null
+  /** 受信が中断したときの文言（§5.7） */
+  streamError: string | null
 }
 
 const emptyQuiz: QuizState = {
@@ -63,7 +73,8 @@ const emptyQuiz: QuizState = {
   order: [],
   index: 0,
   selectedChoiceId: null,
-  revealed: false,
+  result: null,
+  grading: false,
   reviewMode: false,
   stepFilter: [],
 }
@@ -73,7 +84,6 @@ export function initialState(): State {
     authed: false,
     booted: false,
     user: null,
-    // 実データはサーバーから読む。モックは開発パネルから明示的に投入する
     courses: [],
     selectedCourseId: null,
     tab: 'lecture',
@@ -86,19 +96,19 @@ export function initialState(): State {
     createOpen: false,
     draftTitle: '',
     draftMarkdown: '',
-    streamingMessageId: null,
     createError: null,
+    streaming: null,
+    streamError: null,
   }
 }
 
 export type Action =
-  | { type: 'login' }
   | { type: 'logout' }
   /** 起動時の /api/bootstrap の結果 */
   | { type: 'bootstrapped'; user: User; courses: Course[]; selectedId: string | null }
   /** 未ログイン、または起動時の問い合わせに失敗した */
   | { type: 'bootFailed' }
-  /** サーバーから取り直した講義で置き換える（選択時・生成中のポーリング） */
+  /** サーバーから取り直した講義で置き換える（選択時・生成中のポーリング・ステップ完了） */
   | { type: 'courseUpdated'; course: Course }
   | { type: 'courseCreated'; course: Course }
   | { type: 'materialLoaded'; courseId: string; markdown: string }
@@ -112,56 +122,25 @@ export type Action =
   | { type: 'toggleProgress' }
   | { type: 'openCreate' }
   | { type: 'closeCreate' }
-  | { type: 'generationPhase'; courseId: string; phase: 'outline' | 'quiz' }
-  | { type: 'generationDone'; courseId: string }
-  | { type: 'generationFail'; courseId: string; message: string }
   | { type: 'retryGeneration'; courseId: string }
   | { type: 'deleteCourse'; courseId: string }
   | { type: 'renameCourse'; courseId: string; title: string }
-  | { type: 'sendMessage'; text: string }
-  | { type: 'advanceStep' }
-  | { type: 'endStreaming' }
+  // 受講（③④）
+  | { type: 'messageAppended'; courseId: string; message: Message }
+  | { type: 'streamStart'; stepId: string }
+  | { type: 'streamDelta'; text: string }
+  | { type: 'streamEnd' }
+  | { type: 'streamFailed'; message: string }
+  // 確認テスト
+  | { type: 'quizLoaded'; courseId: string; questions: Question[]; attempts: Attempt[] }
+  | { type: 'gradingStarted' }
+  | { type: 'gradingFailed' }
+  | { type: 'attemptRecorded'; result: AttemptResult }
   | { type: 'toggleStepFilter'; stepId: string }
   | { type: 'startQuiz'; reviewMode: boolean }
   | { type: 'selectChoice'; choiceId: string }
-  | { type: 'reveal' }
   | { type: 'nextQuestion' }
   | { type: 'backToQuizStart' }
-  | { type: 'devScenario'; name: DevScenario }
-
-export type DevScenario =
-  | 'reset'
-  | 'login'
-  | 'empty'
-  | 'generating'
-  | 'failed'
-  | 'createSample'
-  | 'confirmCreate'
-  | 'materialTab'
-  | 'deleteDialog'
-  | 'courseMenu'
-  | 'userMenu'
-  | 'quizStart'
-  | 'quizQuestion'
-  | 'quizRevealed'
-  | 'quizResult'
-  | 'reviewEmpty'
-  | 'lectureStepEnd'
-
-let idSeq = 1000
-const nid = (p: string) => `${p}-${++idSeq}`
-
-/** 台本を使い切った後の質問応答モック（§4.2.4） */
-const FALLBACK_ANSWERS = [
-  'よい質問です。教材の該当箇所を確認すると、その点は次のように説明されています。\n\n該当ステップの要点に立ち返ると、判断の分かれ目は「どこに変更が置かれているか」です。手元の状態を `git status` で確認しながら追うと理解しやすくなります。',
-  '補足します。\n\nその挙動は教材に明記されていませんが、一般的な運用としては後続のステップで扱う内容と関係します。ここでは現在のステップの範囲に絞って、まず基本の流れを押さえてください。',
-  '整理すると、混同しやすいのは名前が似ている2つの操作です。\n\n片方は状態を「移す」操作、もう片方は「記録する」操作です。目的が違うと意識すると区別しやすくなります。',
-]
-let fallbackCursor = 0
-
-function currentCourse(s: State): Course | null {
-  return s.courses.find((c) => c.id === s.selectedCourseId) ?? null
-}
 
 function updateCourse(s: State, id: string, fn: (c: Course) => Course): Course[] {
   return s.courses.map((c) => (c.id === id ? fn(c) : c))
@@ -181,11 +160,11 @@ function mergeCourse(prev: Course, next: Course): Course {
     steps: next.detailLoaded ? next.steps : prev.steps,
     messages: next.detailLoaded ? next.messages : prev.messages,
     detailLoaded: prev.detailLoaded || next.detailLoaded,
-    // 教材原文は別のエンドポイントで取得する。講義の更新では触らない（§4.4）
+    // 教材原文と設問は別のエンドポイントで取得する。講義の更新では触らない
     sourceMarkdown: prev.materialLoaded ? prev.sourceMarkdown : next.sourceMarkdown,
     materialLoaded: prev.materialLoaded,
-    // 確認テストは段階3で接続する。それまでモックの設問を保持する
-    questions: prev.questions,
+    questions: prev.quizLoaded ? prev.questions : next.questions,
+    quizLoaded: prev.quizLoaded,
   }
 }
 
@@ -197,6 +176,7 @@ export function latestAttempt(attempts: Attempt[], questionId: string): Attempt 
   return found
 }
 
+/** 復習モードの対象（§4.3.4）。最新の解答が誤答である設問 */
 export function wrongQuestions(course: Course, attempts: Attempt[]): Question[] {
   return course.questions.filter((q) => latestAttempt(attempts, q.id)?.isCorrect === false)
 }
@@ -212,41 +192,8 @@ function shuffle<T>(xs: T[]): T[] {
 
 export function reducer(s: State, action: Action): State {
   switch (action.type) {
-    case 'login':
-      return { ...s, authed: true }
     case 'logout':
       return { ...initialState(), booted: true, authed: false }
-    case 'selectCourse':
-      return {
-        ...s,
-        selectedCourseId: action.id,
-        tab: 'lecture',
-        drawerOpen: false,
-        createOpen: false,
-        quiz: emptyQuiz,
-      }
-    case 'setTab':
-      return { ...s, tab: action.tab, quiz: action.tab === 'quiz' ? { ...emptyQuiz } : s.quiz }
-    case 'setDraft':
-      return {
-        ...s,
-        draftTitle: action.title ?? s.draftTitle,
-        draftMarkdown: action.markdown ?? s.draftMarkdown,
-      }
-    case 'openModal':
-      return { ...s, modal: action.modal }
-    case 'openMenu':
-      return { ...s, menu: action.menu }
-    case 'setDrawer':
-      return { ...s, drawerOpen: action.open }
-    case 'toggleProgress':
-      return { ...s, progressOpen: !s.progressOpen }
-    // 書きかけの入力は破棄せずに復元する（§4.1.5）
-    case 'openCreate':
-      return { ...s, createOpen: true, drawerOpen: false, menu: null }
-    case 'closeCreate':
-      return { ...s, createOpen: false }
-
     case 'bootstrapped':
       return {
         ...s,
@@ -261,7 +208,9 @@ export function reducer(s: State, action: Action): State {
     case 'courseUpdated':
       return {
         ...s,
-        courses: s.courses.map((c) => (c.id === action.course.id ? mergeCourse(c, action.course) : c)),
+        courses: s.courses.map((c) =>
+          c.id === action.course.id ? mergeCourse(c, action.course) : c,
+        ),
       }
     case 'courseCreated':
       return {
@@ -286,55 +235,48 @@ export function reducer(s: State, action: Action): State {
       }
     case 'setCreateError':
       return { ...s, createError: action.message }
-
-    case 'generationPhase':
-      return { ...s, courses: updateCourse(s, action.courseId, (c) => ({ ...c, phase: action.phase })) }
-    case 'generationDone':
+    case 'selectCourse':
       return {
         ...s,
-        courses: updateCourse(s, action.courseId, (c) => {
-          const steps = c.steps.map((x, i) => ({
-            ...x,
-            status: (i === 0 ? 'in_progress' : 'not_started') as never,
-          }))
-          const first = steps[0]
-          return {
-            ...c,
-            status: 'ready',
-            phase: undefined,
-            steps,
-            currentStepId: first.id,
-            scriptCursor: 1,
-            messages: [
-              {
-                id: nid('m'),
-                stepId: first.id,
-                role: 'assistant' as const,
-                content: first.script?.[0] ?? '',
-                createdAt: Date.now(),
-              },
-            ],
-          }
-        }),
+        selectedCourseId: action.id,
+        tab: 'lecture',
+        drawerOpen: false,
+        createOpen: false,
+        quiz: emptyQuiz,
+        // 受信中の発話は選択中の講義に属する。切り替えたら破棄する
+        streaming: null,
+        streamError: null,
       }
-    case 'generationFail':
+    case 'setTab':
+      return { ...s, tab: action.tab, quiz: action.tab === 'quiz' ? { ...emptyQuiz } : s.quiz }
+    case 'setDraft':
       return {
         ...s,
-        courses: updateCourse(s, action.courseId, (c) => ({
-          ...c,
-          status: 'failed',
-          phase: undefined,
-          errorMessage: action.message,
-        })),
+        draftTitle: action.title ?? s.draftTitle,
+        draftMarkdown: action.markdown ?? s.draftMarkdown,
       }
+    case 'openModal':
+      return { ...s, modal: action.modal }
+    case 'openMenu':
+      return { ...s, menu: action.menu }
+    case 'setDrawer':
+      return { ...s, drawerOpen: action.open }
+    case 'toggleProgress':
+      return { ...s, progressOpen: !s.progressOpen }
+    // 書きかけの入力は破棄せずに復元する（§4.1.5）
+    case 'openCreate':
+      return { ...s, createOpen: true, drawerOpen: false, menu: null }
+    case 'closeCreate':
+      return { ...s, createOpen: false }
     case 'retryGeneration':
       return {
         ...s,
         courses: updateCourse(s, action.courseId, (c) => ({
           ...c,
           status: 'generating',
+          quizStatus: 'pending',
           phase: 'outline',
-          errorMessage: undefined,
+          errorMessage: null,
         })),
       }
     case 'deleteCourse': {
@@ -346,6 +288,7 @@ export function reducer(s: State, action: Action): State {
           s.selectedCourseId === action.courseId ? (courses[0]?.id ?? null) : s.selectedCourseId,
         modal: null,
         menu: null,
+        quiz: emptyQuiz,
       }
     }
     case 'renameCourse':
@@ -355,81 +298,61 @@ export function reducer(s: State, action: Action): State {
         menu: null,
       }
 
-    case 'sendMessage': {
-      const c = currentCourse(s)
-      if (!c || !c.currentStepId) return s
-      const step = c.steps.find((x) => x.id === c.currentStepId)!
-      const userMsg = {
-        id: nid('m'),
-        stepId: step.id,
-        role: 'user' as const,
-        content: action.text,
-        createdAt: Date.now(),
-      }
-      const script = step.script ?? []
-      const hasNext = c.scriptCursor < script.length
-      const content = hasNext
-        ? script[c.scriptCursor]
-        : FALLBACK_ANSWERS[fallbackCursor++ % FALLBACK_ANSWERS.length]
-      const aiMsg = {
-        id: nid('m'),
-        stepId: step.id,
-        role: 'assistant' as const,
-        content,
-        createdAt: Date.now(),
-      }
+    // ------------------------------------------------------------ 受講（③④）
+    case 'messageAppended':
       return {
         ...s,
-        streamingMessageId: aiMsg.id,
-        courses: updateCourse(s, c.id, (x) => ({
-          ...x,
-          messages: [...x.messages, userMsg, aiMsg],
-          scriptCursor: hasNext ? x.scriptCursor + 1 : x.scriptCursor,
-          updatedAt: Date.now(),
+        courses: updateCourse(s, action.courseId, (c) => ({
+          ...c,
+          messages: [...c.messages, action.message],
+          updatedAt: action.message.createdAt,
         })),
       }
-    }
-    case 'advanceStep': {
-      const c = currentCourse(s)
-      if (!c || !c.currentStepId) return s
-      const idx = c.steps.findIndex((x) => x.id === c.currentStepId)
-      const next = c.steps[idx + 1]
-      const steps = c.steps.map((x, i) =>
-        i === idx
-          ? { ...x, status: 'completed' as const }
-          : i === idx + 1
-            ? { ...x, status: 'in_progress' as const }
-            : x,
-      )
-      if (!next) {
-        return {
-          ...s,
-          courses: updateCourse(s, c.id, (x) => ({ ...x, steps, currentStepId: null })),
-        }
-      }
-      const aiMsg = {
-        id: nid('m'),
-        stepId: next.id,
-        role: 'assistant' as const,
-        content: next.script?.[0] ?? '',
-        createdAt: Date.now(),
-      }
-      return {
-        ...s,
-        streamingMessageId: aiMsg.id,
-        courses: updateCourse(s, c.id, (x) => ({
-          ...x,
-          steps,
-          currentStepId: next.id,
-          scriptCursor: 1,
-          messages: [...x.messages, aiMsg],
-          updatedAt: Date.now(),
-        })),
-      }
-    }
-    case 'endStreaming':
-      return { ...s, streamingMessageId: null }
+    case 'streamStart':
+      return { ...s, streaming: { stepId: action.stepId, text: '' }, streamError: null }
+    case 'streamDelta':
+      return s.streaming
+        ? { ...s, streaming: { ...s.streaming, text: s.streaming.text + action.text } }
+        : s
+    case 'streamEnd':
+      return { ...s, streaming: null }
+    case 'streamFailed':
+      return { ...s, streaming: null, streamError: action.message }
 
+    // ---------------------------------------------------------- 確認テスト
+    case 'quizLoaded':
+      return {
+        ...s,
+        courses: updateCourse(s, action.courseId, (c) => ({
+          ...c,
+          questions: action.questions,
+          quizLoaded: true,
+        })),
+        // サーバーの解答記録を初期値にする。手元の記録は同じ講義のものだけ入れ替える
+        attempts: [
+          ...s.attempts.filter(
+            (a) => !action.questions.some((q) => q.id === a.questionId),
+          ),
+          ...action.attempts,
+        ],
+      }
+    case 'gradingStarted':
+      return { ...s, quiz: { ...s.quiz, grading: true } }
+    case 'gradingFailed':
+      return { ...s, quiz: { ...s.quiz, grading: false } }
+    case 'attemptRecorded':
+      return {
+        ...s,
+        quiz: { ...s.quiz, grading: false, result: action.result },
+        attempts: [
+          ...s.attempts,
+          {
+            questionId: action.result.questionId,
+            isCorrect: action.result.isCorrect,
+            answeredAt: action.result.answeredAt,
+          },
+        ],
+      }
     case 'toggleStepFilter': {
       const f = s.quiz.stepFilter
       return {
@@ -443,7 +366,7 @@ export function reducer(s: State, action: Action): State {
       }
     }
     case 'startQuiz': {
-      const c = currentCourse(s)
+      const c = s.courses.find((x) => x.id === s.selectedCourseId)
       if (!c) return s
       const pool = action.reviewMode
         ? wrongQuestions(c, s.attempts)
@@ -453,7 +376,17 @@ export function reducer(s: State, action: Action): State {
               q.coveredStepIds.some((id) => s.quiz.stepFilter.includes(id)),
             )
       if (pool.length === 0) {
-        return { ...s, quiz: { ...s.quiz, phase: 'result', order: [], index: 0, reviewMode: action.reviewMode } }
+        return {
+          ...s,
+          quiz: {
+            ...s.quiz,
+            phase: 'result',
+            order: [],
+            index: 0,
+            result: null,
+            reviewMode: action.reviewMode,
+          },
+        }
       }
       return {
         ...s,
@@ -464,180 +397,34 @@ export function reducer(s: State, action: Action): State {
           index: 0,
           phase: 'question',
           selectedChoiceId: null,
-          revealed: false,
+          result: null,
+          grading: false,
           reviewMode: action.reviewMode,
         },
       }
     }
     case 'selectChoice':
-      return s.quiz.revealed ? s : { ...s, quiz: { ...s.quiz, selectedChoiceId: action.choiceId } }
-    case 'reveal': {
-      const c = currentCourse(s)
-      const qid = s.quiz.order[s.quiz.index]
-      const question = c?.questions.find((q) => q.id === qid)
-      const choice = question?.choices.find((x) => x.id === s.quiz.selectedChoiceId)
-      if (!question || !choice) return s
-      return {
-        ...s,
-        quiz: { ...s.quiz, revealed: true },
-        attempts: [
-          ...s.attempts,
-          {
-            questionId: question.id,
-            selectedChoiceId: choice.id,
-            isCorrect: choice.isCorrect,
-            answeredAt: Date.now(),
-          },
-        ],
-      }
-    }
+      // 確定後の変更は不可（§4.3.2）
+      return s.quiz.result ? s : { ...s, quiz: { ...s.quiz, selectedChoiceId: action.choiceId } }
     case 'nextQuestion': {
       const last = s.quiz.index >= s.quiz.order.length - 1
       return {
         ...s,
         quiz: last
           ? { ...s.quiz, phase: 'result' }
-          : { ...s.quiz, index: s.quiz.index + 1, selectedChoiceId: null, revealed: false },
+          : {
+              ...s.quiz,
+              index: s.quiz.index + 1,
+              selectedChoiceId: null,
+              result: null,
+            },
       }
     }
     case 'backToQuizStart':
       return { ...s, quiz: { ...emptyQuiz, stepFilter: s.quiz.stepFilter } }
-
-    case 'devScenario':
-      return applyScenario(s, action.name)
     default:
       return s
   }
-}
-
-/** 開発パネル専用。モック講義を積んだ状態を作る（実データとは別系統） */
-function mockState(): State {
-  const courses = createInitialCourses()
-  return {
-    ...initialState(),
-    authed: true,
-    booted: true,
-    user: MOCK_USER,
-    courses,
-    selectedCourseId: courses[0]?.id ?? null,
-  }
-}
-
-function applyScenario(s: State, name: DevScenario): State {
-  const fresh = mockState()
-  const gitId = 'c-git'
-  switch (name) {
-    case 'reset':
-      return fresh
-    case 'login':
-      return { ...initialState(), booted: true, authed: false }
-    case 'empty':
-      return { ...fresh, courses: [], selectedCourseId: null }
-    case 'generating':
-      return {
-        ...fresh,
-        tab: 'lecture',
-        selectedCourseId: gitId,
-        courses: updateCourse(fresh, gitId, (c) => ({ ...c, status: 'generating', phase: 'outline' })),
-      }
-    case 'failed':
-      return {
-        ...fresh,
-        tab: 'lecture',
-        selectedCourseId: gitId,
-        courses: updateCourse(fresh, gitId, (c) => ({
-          ...c,
-          status: 'failed',
-          errorMessage: 'レート制限に達しました。',
-        })),
-      }
-    case 'createSample':
-      return { ...fresh, createOpen: true, draftTitle: 'Git入門', draftMarkdown: SAMPLE_MARKDOWN }
-    case 'materialTab':
-      return { ...fresh, tab: 'material', selectedCourseId: gitId }
-    case 'confirmCreate':
-      return {
-        ...fresh,
-        createOpen: true,
-        draftTitle: 'Git入門',
-        draftMarkdown: SAMPLE_MARKDOWN,
-        modal: { type: 'confirmCreate', title: 'Git入門', charCount: SAMPLE_MARKDOWN.length },
-      }
-    case 'deleteDialog':
-      return { ...fresh, modal: { type: 'deleteCourse', courseId: gitId } }
-    case 'courseMenu':
-      return { ...fresh, menu: { type: 'course', courseId: gitId } }
-    case 'userMenu':
-      return { ...fresh, menu: { type: 'user' } }
-    case 'quizStart':
-      return { ...fresh, tab: 'quiz', selectedCourseId: gitId, attempts: sampleAttempts(fresh) }
-    case 'quizQuestion': {
-      const withAttempts = { ...fresh, tab: 'quiz' as const, selectedCourseId: gitId }
-      return reducer(withAttempts, { type: 'startQuiz', reviewMode: false })
-    }
-    case 'quizRevealed': {
-      const base = reducer(
-        { ...fresh, tab: 'quiz', selectedCourseId: gitId },
-        { type: 'startQuiz', reviewMode: false },
-      )
-      const q = base.courses
-        .find((c) => c.id === gitId)!
-        .questions.find((x) => x.id === base.quiz.order[0])!
-      const wrong = q.choices.find((c) => !c.isCorrect)!
-      return reducer(reducer(base, { type: 'selectChoice', choiceId: wrong.id }), { type: 'reveal' })
-    }
-    case 'quizResult': {
-      const withAttempts = { ...fresh, tab: 'quiz' as const, selectedCourseId: gitId, attempts: sampleAttempts(fresh) }
-      const started = reducer(withAttempts, { type: 'startQuiz', reviewMode: false })
-      return { ...started, quiz: { ...started.quiz, phase: 'result' } }
-    }
-    case 'reviewEmpty': {
-      const c = fresh.courses.find((x) => x.id === gitId)!
-      const allCorrect: Attempt[] = c.questions.map((q) => ({
-        questionId: q.id,
-        selectedChoiceId: q.choices.find((x) => x.isCorrect)!.id,
-        isCorrect: true,
-        answeredAt: Date.now(),
-      }))
-      const st = { ...fresh, tab: 'quiz' as const, selectedCourseId: gitId, attempts: allCorrect }
-      return reducer(st, { type: 'startQuiz', reviewMode: true })
-    }
-    case 'lectureStepEnd': {
-      const st = { ...fresh, tab: 'lecture' as const, selectedCourseId: gitId }
-      return {
-        ...st,
-        courses: updateCourse(st, gitId, (c) => {
-          const step = c.steps.find((x) => x.id === c.currentStepId)!
-          return {
-            ...c,
-            scriptCursor: (step.script ?? []).length,
-            messages: (step.script ?? []).map((content) => ({
-              id: nid('m'),
-              stepId: step.id,
-              role: 'assistant' as const,
-              content,
-              createdAt: Date.now(),
-            })),
-          }
-        }),
-      }
-    }
-    default:
-      return s
-  }
-}
-
-/** 開始画面や結果画面の見た目確認用に、正誤混在の解答記録を作る */
-function sampleAttempts(s: State): Attempt[] {
-  const c = s.courses.find((x) => x.id === 'c-git')
-  if (!c) return []
-  return c.questions.slice(0, 9).map((q, i) => {
-    const correct = i % 3 !== 0
-    const choice = correct
-      ? q.choices.find((x) => x.isCorrect)!
-      : q.choices.find((x) => !x.isCorrect)!
-    return { questionId: q.id, selectedChoiceId: choice.id, isCorrect: correct, answeredAt: i + 1 }
-  })
 }
 
 export const StoreCtx = createContext<{ state: State; dispatch: Dispatch<Action> } | null>(null)

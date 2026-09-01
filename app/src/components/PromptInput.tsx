@@ -1,17 +1,19 @@
 import { useState } from 'react'
-import { useStore } from '../store'
+import { useLectureTurn } from '../hooks/useLectureTurn'
+import type { Course } from '../types'
 import { IconSend } from './Icons'
 
 /** E-1（§3.4）。講義タブでのみ表示する。 */
-export function PromptInput({ disabled }: { disabled?: boolean }) {
-  const { dispatch } = useStore()
+export function PromptInput({ course }: { course: Course }) {
+  const { running, send } = useLectureTurn(course)
   const [text, setText] = useState('')
+  const disabled = course.currentStepId === null || running
 
-  const send = () => {
+  const submit = () => {
     const t = text.trim()
     if (!t || disabled) return
-    dispatch({ type: 'sendMessage', text: t })
     setText('')
+    void send(t)
   }
 
   return (
@@ -23,16 +25,22 @@ export function PromptInput({ disabled }: { disabled?: boolean }) {
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault()
-              send()
+              submit()
             }
           }}
           rows={1}
           disabled={disabled}
-          placeholder={disabled ? '講義が完了しました' : 'プロンプトを入力'}
+          placeholder={
+            course.currentStepId === null
+              ? '講義が完了しました'
+              : running
+                ? 'AIが応答しています…'
+                : 'プロンプトを入力'
+          }
           className="max-h-32 min-h-[24px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
         />
         <button
-          onClick={send}
+          onClick={submit}
           disabled={disabled || !text.trim()}
           aria-label="送信"
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-900 text-white transition disabled:bg-slate-200 disabled:text-slate-400"

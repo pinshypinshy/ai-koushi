@@ -41,7 +41,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // 一覧から選び直した講義は中身を持っていないため、選択された時点で取りに行く
   const selectedId = state.selectedCourseId
   const selected = state.courses.find((c) => c.id === selectedId)
-  const needsDetail = !!selected && !selected.detailLoaded && !selected.isMock
+  const needsDetail = !!selected && !selected.detailLoaded
   useEffect(() => {
     if (!selectedId || !needsDetail) return
     let alive = true

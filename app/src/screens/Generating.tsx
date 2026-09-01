@@ -13,22 +13,7 @@ export function Generating({ course }: { course: Course }) {
   const { dispatch } = useStore()
   const activeIndex = course.phase === 'quiz' ? 1 : 0
 
-  const isMock = course.isMock === true
-
   useEffect(() => {
-    // 開発パネルのモック講義はサーバーに存在しないため、従来どおりタイマーで模擬する
-    if (isMock) {
-      const t1 = setTimeout(
-        () => dispatch({ type: 'generationPhase', courseId: course.id, phase: 'quiz' }),
-        2200,
-      )
-      const t2 = setTimeout(() => dispatch({ type: 'generationDone', courseId: course.id }), 4600)
-      return () => {
-        clearTimeout(t1)
-        clearTimeout(t2)
-      }
-    }
-
     let alive = true
     const timer = setInterval(() => {
       api
@@ -44,7 +29,7 @@ export function Generating({ course }: { course: Course }) {
       alive = false
       clearInterval(timer)
     }
-  }, [course.id, isMock, dispatch])
+  }, [course.id, dispatch])
 
   return (
     <div className="flex h-full flex-col items-center justify-center px-6 text-center">

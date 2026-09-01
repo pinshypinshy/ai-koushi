@@ -1,10 +1,15 @@
 import type {
   ApiError,
+  ApiMessage,
+  AttemptResult,
   BootstrapResponse,
   CourseDetail,
   CourseSummary,
   CreateCourseResponse,
+  LectureStreamLine,
   MaterialResponse,
+  QuizResponse,
+  SendMessageRequest,
 } from '../../shared/api'
 import type { Course } from './types'
 
@@ -62,15 +67,91 @@ export const api = {
       method: 'POST',
     }),
   logout: () => request<unknown>('/auth/logout', { method: 'POST' }),
+
+  /** 確認テストの出題（§4.3.1）。正解と解説は含まれない */
+  quiz: (courseId: string) => request<QuizResponse>(`/api/courses/${encodeURIComponent(courseId)}/quiz`),
+  /** 解答の判定（§4.3.2）。正誤・正解・解説はここで初めて渡される */
+  attempt: (questionId: string, selectedChoiceId: string) =>
+    request<AttemptResult>(`/api/questions/${encodeURIComponent(questionId)}/attempts`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ selectedChoiceId }),
+    }),
+  /** ステップ完了（§4.2.2）。⑤の要約を作り、現在地を次へ移した講義が返る */
+  completeStep: (courseId: string, stepId: string) =>
+    request<CourseDetail>(
+      `/api/courses/${encodeURIComponent(courseId)}/steps/${encodeURIComponent(stepId)}/complete`,
+      { method: 'POST' },
+    ),
+  renameCourse: (courseId: string, title: string) =>
+    request<{ courseId: string; title: string }>(`/api/courses/${encodeURIComponent(courseId)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title }),
+    }),
+  deleteCourse: async (courseId: string) => {
+    // 204 を返すため JSON の解釈を行わない
+    const res = await fetch(`/api/courses/${encodeURIComponent(courseId)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+    })
+    if (!res.ok) throw new ApiFailure(res.status, 'delete_failed', '講義を削除できませんでした')
+  },
 }
 
 /**
- * サーバーの表現を画面の表現へ変換する。
+ * ③講義本文・④質問応答の受信（§8.1）。
  *
- * 講義タブと確認テストタブはまだモックで動いているため（段階3で置き換える）、
- * 画面側の Course には台本や設問といったモック専用の項目が残っている。
- * 実データの講義ではそれらを空にする。
+ * 応答は NDJSON で届く。文字の断片は onDelta へ渡し、保存された発言を返り値にする。
+ * サーバーが error 行を返した場合は例外にする。部分生成分は保存済みであるため（§5.7）、
+ * 呼び出し側は講義を取り直せば途中までの発話を表示できる。
  */
+export async function streamTurn(
+  path: string,
+  body: SendMessageRequest | null,
+  onDelta: (text: string) => void,
+): Promise<ApiMessage> {
+  const res = await fetch(path, {
+    method: 'POST',
+    credentials: 'same-origin',
+    ...(body
+      ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }
+      : {}),
+  })
+  if (!res.ok || !res.body) {
+    const error = await res
+      .json()
+      .then((v) => v as Partial<ApiError>)
+      .catch(() => ({}) as Partial<ApiError>)
+    throw new ApiFailure(res.status, error.error ?? 'unknown', error.message ?? '応答を取得できませんでした')
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let saved: ApiMessage | null = null
+
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    // 最後の要素は行の途中である可能性があるため次の受信へ持ち越す
+    buffer = lines.pop() ?? ''
+    for (const raw of lines) {
+      if (!raw.trim()) continue
+      const line = JSON.parse(raw) as LectureStreamLine
+      if ('delta' in line) onDelta(line.delta)
+      else if ('done' in line) saved = line.done
+      else if ('error' in line) throw new ApiFailure(500, 'stream_failed', line.error.message)
+    }
+  }
+
+  if (!saved) throw new ApiFailure(500, 'stream_incomplete', '応答が途中で終わりました')
+  return saved
+}
+
+/** サーバーの表現を画面の表現へ変換する */
 export function courseFromDetail(detail: CourseDetail): Course {
   return {
     ...courseFromSummary(detail),
@@ -98,7 +179,6 @@ export function courseFromSummary(summary: CourseSummary): Course {
     messages: [],
     questions: [],
     sourceMarkdown: '',
-    scriptCursor: 0,
     detailLoaded: false,
   }
 }

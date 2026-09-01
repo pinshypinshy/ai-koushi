@@ -1,51 +1,29 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
+import { ApiFailure, api, courseFromDetail } from '../api'
 import { useStore } from '../store'
+import { useLectureTurn } from '../hooks/useLectureTurn'
 import type { Course, Message } from '../types'
 import { Markdown } from '../components/Markdown'
 import { IconUser } from '../components/Icons'
 
-/**
- * ストリーミング表示の模擬（§8.1）。実装時は SSE の逐次受信に置き換わる。
- * 受信中だけこのコンポーネントを描画し、完了したら呼び出し側が通常描画へ戻す。
- */
-function StreamedMarkdown({ text, onDone }: { text: string; onDone: () => void }) {
-  const [len, setLen] = useState(0)
-  const onDoneRef = useRef(onDone)
-
-  useEffect(() => {
-    onDoneRef.current = onDone
-  })
-
-  useEffect(() => {
-    let i = 0
-    const id = setInterval(() => {
-      i = Math.min(i + 3, text.length)
-      setLen(i)
-      if (i >= text.length) {
-        clearInterval(id)
-        onDoneRef.current()
-      }
-    }, 16)
-    return () => clearInterval(id)
-  }, [text])
-
+function AssistantBubble({ children }: { children: React.ReactNode }) {
   return (
-    <>
-      <Markdown>{text.slice(0, len)}</Markdown>
-      <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-slate-400 align-text-bottom" />
-    </>
+    <div className="flex gap-2.5">
+      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold text-white">
+        AI
+      </span>
+      <div className="min-w-0 max-w-[85%] rounded-2xl rounded-tl-sm border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+        {children}
+      </div>
+    </div>
   )
 }
 
-function Bubble({
-  message,
-  streaming,
-  onDone,
-}: {
-  message: Message
-  streaming: boolean
-  onDone: () => void
-}) {
+/**
+ * 受信中は state が頻繁に変わる。確定済みの発話まで描き直すと
+ * 数式の組版をやり直すことになり、表示がかくつく原因になる。
+ */
+const Bubble = memo(function Bubble({ message }: { message: Message }) {
   if (message.role === 'user') {
     return (
       <div className="flex justify-end gap-2.5">
@@ -56,40 +34,110 @@ function Bubble({
       </div>
     )
   }
-
   return (
-    <div className="flex gap-2.5">
-      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold text-white">
-        AI
-      </span>
-      <div className="min-w-0 max-w-[85%] rounded-2xl rounded-tl-sm border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-        {streaming ? (
-          <StreamedMarkdown text={message.content} onDone={onDone} />
-        ) : (
-          <Markdown>{message.content}</Markdown>
-        )}
-      </div>
-    </div>
+    <AssistantBubble>
+      <Markdown>{message.content}</Markdown>
+    </AssistantBubble>
   )
-}
+})
+
+/**
+ * 講義タブの表示位置。
+ *
+ * タブを切り替えると講義タブは一度取り外されるため、位置を覚えておかないと
+ * 戻ったときに先頭へ跳ぶ。講義が変わった場合とリロード直後は末尾から始める。
+ */
+let savedScroll: { courseId: string; top: number } | null = null
 
 /** SC-07 講義タブ（§4.2） */
 export function LectureTab({ course }: { course: Course }) {
   const { state, dispatch } = useStore()
-  const endRef = useRef<HTMLDivElement>(null)
+  const { running, start } = useLectureTurn(course)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const scrollerRef = useRef<HTMLElement | null>(null)
+  /** 末尾に貼り付いているか。新しい発話で追従するかの判断に使う */
+  const stickRef = useRef(true)
+  const [completing, setCompleting] = useState(false)
+  const [completeError, setCompleteError] = useState<string | null>(null)
 
   const step = course.steps.find((s) => s.id === course.currentStepId) ?? null
-  // 台本はモック専用（実データの講義は持たない）。段階3で③の逐次生成に置き換える。
-  // 実データの講義で台本を使った判定を通すと、発話が1つも無いのに
-  // 「次のステップへ進む」が出てしまうため、モックの場合だけ有効にする
-  const isMock = course.isMock === true
-  const scriptFinished = isMock && step ? course.scriptCursor >= (step.script?.length ?? 0) : false
   const allDone = course.currentStepId === null
   const isLast = step ? step.orderIndex === course.steps.length : false
+  const hasMessages = course.messages.some((m) => m.stepId === course.currentStepId)
 
+  /**
+   * §4.2.2「講義を開いた時点で、未完了の最初のステップの講義本文を生成・表示する」。
+   * 開始済みのステップを覚えておき、再描画のたびに呼び直さない（呼ぶたびに課金される）。
+   */
+  const startedFor = useRef<string | null>(null)
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [course.messages.length, state.streamingMessageId])
+    const id = course.currentStepId
+    if (!id || !course.detailLoaded || hasMessages || running || state.streamError) return
+    if (startedFor.current === id) return
+    startedFor.current = id
+    void start()
+  }, [course.currentStepId, course.detailLoaded, hasMessages, running, state.streamError, start])
+
+  /**
+   * 表示位置の管理。スクロールするのは App 側の <main> であるため、親を辿って掴む。
+   *
+   * 位置の記録を「取り外される直前」ではなくスクロールのたびに行うのは、
+   * React の後片付けが取り外しの後に走るため。その時点では中身が入れ替わっており、
+   * スクロール位置は 0 に丸められていて読み取れない。
+   *
+   * 復元するのはタブを切り替えて戻ってきた場合のみ。講義を変えた場合と
+   * リロード直後は末尾から始める。
+   */
+  useEffect(() => {
+    const el = (rootRef.current?.closest('main') as HTMLElement | null) ?? null
+    scrollerRef.current = el
+    if (!el) return
+
+    const restore = savedScroll && savedScroll.courseId === course.id ? savedScroll.top : null
+    // 復元しない場合は末尾に貼り付ける。発話の取得が遅れて届いても末尾を保てる
+    stickRef.current = restore === null
+
+    // 直後は高さが確定していないことがあるため、描画の後に適用する
+    const raf = requestAnimationFrame(() => {
+      el.scrollTop = restore !== null ? restore : el.scrollHeight
+    })
+
+    const onScroll = () => {
+      stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+      savedScroll = { courseId: course.id, top: el.scrollTop }
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+
+    return () => {
+      cancelAnimationFrame(raf)
+      el.removeEventListener('scroll', onScroll)
+    }
+  }, [course.id])
+
+  /**
+   * 新しい発話が届いたときの追従。末尾付近にいるときだけ動かす。
+   * 上に戻って読んでいる最中に引き戻さないため。
+   */
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (el && stickRef.current) el.scrollTop = el.scrollHeight
+  }, [course.messages.length, state.streaming?.text])
+
+  /** ステップ完了（§4.2.2）。⑤の要約を作るため、応答まで数秒かかる */
+  async function complete() {
+    if (!course.currentStepId) return
+    setCompleting(true)
+    setCompleteError(null)
+    try {
+      const detail = await api.completeStep(course.id, course.currentStepId)
+      dispatch({ type: 'courseUpdated', course: courseFromDetail(detail) })
+      // 次のステップの解説は上の副作用が開始する
+    } catch (err) {
+      setCompleteError(err instanceof ApiFailure ? err.message : 'ステップを完了できませんでした')
+    } finally {
+      setCompleting(false)
+    }
+  }
 
   // ステップ境界の区切り位置をレンダリング前に決める（描画中に値を書き換えない）
   const dividerIds = new Set<string>()
@@ -99,7 +147,7 @@ export function LectureTab({ course }: { course: Course }) {
   }, null)
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-4">
+    <div ref={rootRef} className="mx-auto w-full max-w-3xl space-y-5 px-4 py-4">
       {course.messages.map((m) => {
         const s = course.steps.find((x) => x.id === m.stepId)
         return (
@@ -113,23 +161,53 @@ export function LectureTab({ course }: { course: Course }) {
                 <span className="h-px flex-1 bg-slate-200" />
               </div>
             )}
-            <Bubble
-              message={m}
-              streaming={state.streamingMessageId === m.id}
-              onDone={() => dispatch({ type: 'endStreaming' })}
-            />
+            <Bubble message={m} />
           </div>
         )
       })}
 
-      {scriptFinished && !state.streamingMessageId && (
-        <div className="flex justify-center pt-2">
+      {/* 受信中の発話。届いた文字をそのまま表示する（§8.1） */}
+      {state.streaming && (
+        <AssistantBubble>
+          {state.streaming.text ? (
+            <Markdown>{state.streaming.text}</Markdown>
+          ) : (
+            <span className="text-sm text-slate-400">応答を待っています…</span>
+          )}
+          <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-slate-400 align-text-bottom" />
+        </AssistantBubble>
+      )}
+
+      {state.streamError && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-center">
+          <p className="text-sm text-amber-800">{state.streamError}</p>
           <button
-            onClick={() => dispatch({ type: 'advanceStep' })}
-            className="rounded-full bg-slate-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-slate-700"
+            onClick={() => void start()}
+            className="mt-3 rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white transition hover:bg-slate-700"
           >
-            {isLast ? '講義を終える' : '次のステップへ進む'}
+            続きを生成する
           </button>
+        </div>
+      )}
+
+      {/*
+        「次のステップへ進む」は常に出す。ステップ完了はユーザーが次へ進むことに
+        同意した時点であり（Q-4）、判断は本人に委ねられているため。
+      */}
+      {!allDone && !running && !state.streamError && hasMessages && (
+        <div className="flex flex-col items-center gap-2 pt-2">
+          <button
+            onClick={() => void complete()}
+            disabled={completing}
+            className="rounded-full bg-slate-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-slate-700 disabled:opacity-60"
+          >
+            {completing
+              ? '要約を作成しています…'
+              : isLast
+                ? '講義を終える'
+                : '次のステップへ進む'}
+          </button>
+          {completeError && <p className="text-xs text-rose-600">{completeError}</p>}
         </div>
       )}
 
@@ -145,24 +223,6 @@ export function LectureTab({ course }: { course: Course }) {
           </button>
         </div>
       )}
-
-      {!isMock && course.messages.length === 0 && (
-        <div className="rounded-xl border border-slate-200 bg-white px-5 py-6 text-center">
-          <p className="text-sm font-medium text-slate-700">受講はまだ接続していません</p>
-          <p className="mt-2 text-xs leading-relaxed text-slate-500">
-            講義本文の生成（③）と質問応答（④）はサーバー側の実装が残っています。
-            <br />
-            教材タブと進捗は実データで表示されます。
-          </p>
-        </div>
-      )}
-
-      {isMock && (
-        <p className="pt-1 text-center text-[11px] text-slate-400">
-          この講義はモックデータです（開発パネルから投入したもの）
-        </p>
-      )}
-      <div ref={endRef} />
     </div>
   )
 }

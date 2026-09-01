@@ -8,7 +8,6 @@ import { Sidebar } from './components/Sidebar'
 import { TabBar } from './components/TabBar'
 import { ProgressCollapsible, ProgressPanel } from './components/ProgressPanel'
 import { PromptInput } from './components/PromptInput'
-import { DevPanel } from './components/DevPanel'
 import { Modal, DialogButtons, btnDanger, btnGhost, btnPrimary } from './components/Modal'
 import { IconMenu, IconUser } from './components/Icons'
 import { Login } from './screens/Login'
@@ -37,6 +36,33 @@ function Dialogs() {
   const { state, dispatch } = useStore()
   const [renameValue, setRenameValue] = useState('')
   const [creating, setCreating] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  /** §4.5 リネーム。サーバーへ反映してから画面を更新する */
+  async function submitRename(courseId: string, title: string) {
+    setBusy(true)
+    try {
+      await api.renameCourse(courseId, title)
+      dispatch({ type: 'renameCourse', courseId, title })
+    } catch {
+      // 失敗時はメニューを閉じない。利用者がもう一度押せば再試行になる
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** §4.5 削除。関連するステップ・対話・設問・解答記録もサーバー側で消える */
+  async function submitDelete(courseId: string) {
+    setBusy(true)
+    try {
+      await api.deleteCourse(courseId)
+      dispatch({ type: 'deleteCourse', courseId })
+    } catch {
+      dispatch({ type: 'openModal', modal: null })
+    } finally {
+      setBusy(false)
+    }
+  }
 
   /**
    * §4.1.4 講義作成。作成を投げたあと、生成中の講義を1件取得して一覧へ載せる。
@@ -114,13 +140,13 @@ function Dialogs() {
                     />
                     <button
                       onClick={() =>
-                        dispatch({
-                          type: 'renameCourse',
-                          courseId: menuCourse.id,
-                          title: (renameValue || menuCourse.title).trim() || menuCourse.title,
-                        })
+                        void submitRename(
+                          menuCourse.id,
+                          (renameValue || menuCourse.title).trim() || menuCourse.title,
+                        )
                       }
-                      className="shrink-0 rounded-lg bg-slate-900 px-3 text-xs font-medium text-white"
+                      disabled={busy}
+                      className="shrink-0 rounded-lg bg-slate-900 px-3 text-xs font-medium text-white disabled:opacity-60"
                     >
                       保存
                     </button>
@@ -200,8 +226,12 @@ function Dialogs() {
             <button className={btnGhost} onClick={() => dispatch({ type: 'openModal', modal: null })}>
               キャンセル
             </button>
-            <button className={btnDanger} onClick={() => dispatch({ type: 'deleteCourse', courseId: modal.courseId })}>
-              削除する
+            <button
+              className={btnDanger}
+              disabled={busy}
+              onClick={() => void submitDelete(modal.courseId)}
+            >
+              {busy ? '削除しています…' : '削除する'}
             </button>
           </DialogButtons>
         </Modal>
@@ -223,7 +253,6 @@ function Shell() {
     return (
       <>
         <Login />
-        <DevPanel />
       </>
     )
   }
@@ -260,8 +289,7 @@ function Shell() {
 
         {showLectureChrome && (
           <div className="shrink-0 border-t border-slate-200 bg-slate-100">
-            {/* 質問応答（④）は未接続のため、実データの講義では入力させない */}
-            <PromptInput disabled={course.currentStepId === null || !course.isMock} />
+            <PromptInput course={course} />
           </div>
         )}
 
@@ -285,7 +313,6 @@ function Shell() {
         {state.createOpen && <CreateOverlay />}
 
         <Dialogs />
-        <DevPanel />
       </div>
     )
   }
@@ -312,17 +339,13 @@ function Shell() {
           )}
         </div>
 
-        {/* 質問応答（④）は未接続のため、実データの講義では入力させない */}
-        {showLectureChrome && (
-          <PromptInput disabled={course.currentStepId === null || !course.isMock} />
-        )}
+        {showLectureChrome && <PromptInput course={course} />}
 
         {/* SC-03 講義作成オーバーレイ（§4.1）。サイドバーは残し、タブバーとメイン領域を覆う */}
         {state.createOpen && <CreateOverlay />}
       </div>
 
       <Dialogs />
-      <DevPanel />
     </div>
   )
 }
