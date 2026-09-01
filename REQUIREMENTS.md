@@ -1263,6 +1263,9 @@ DBに D1 を採用したため、SQLite の型に合わせる。以下は全テ�
 | title | text | 講義タイトル。未入力で作成した場合は空文字とし、①の命名で埋める（§5.2） |
 | status | enum | `generating` / `ready` / `failed` |
 | quiz_status | enum | `pending` / `ready` / `failed`。確認テストの状態を status と独立に持つ（Q-25） |
+| phase | enum NULL | 生成中の段階（§7.4「進捗の粒度」）。`outline` / `quiz`。`ready` / `failed` では NULL |
+| error_message | text NULL | 失敗時にユーザーへ提示する文言（§4.1.6）。SC-06 の表示に使う |
+| workflow_id | text NULL | 講義作成ジョブのインスタンスID（§7.4）。状態照会に用いる |
 | current_step_id | uuid FK → steps NULL | 現在地 |
 | created_at / updated_at | timestamptz | 一覧の並び順に使用 |
 
