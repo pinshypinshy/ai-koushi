@@ -60,6 +60,8 @@ export interface State {
   progressOpen: boolean
   /** 講義作成オーバーレイ（SC-03）を開いているか */
   createOpen: boolean
+  /** 使い方ガイド（SC-17）を開いているか（§4.8） */
+  helpOpen: boolean
   /** 講義作成オーバーレイの入力状態 */
   draftTitle: string
   draftMarkdown: string
@@ -97,6 +99,7 @@ export function initialState(): State {
     drawerOpen: false,
     progressOpen: false,
     createOpen: false,
+    helpOpen: false,
     draftTitle: '',
     draftMarkdown: '',
     createError: null,
@@ -133,6 +136,7 @@ export type Action =
   | { type: 'toggleProgress' }
   | { type: 'openCreate' }
   | { type: 'closeCreate' }
+  | { type: 'setHelp'; open: boolean }
   | { type: 'retryGeneration'; courseId: string }
   | { type: 'deleteCourse'; courseId: string }
   | { type: 'renameCourse'; courseId: string; title: string }
@@ -256,6 +260,7 @@ export function reducer(s: State, action: Action): State {
         tab: 'lecture',
         drawerOpen: false,
         createOpen: false,
+        helpOpen: false,
         quiz: emptyQuiz,
         // 受信中の発話は選択中の講義に属する。切り替えたら破棄する
         streaming: null,
@@ -279,9 +284,13 @@ export function reducer(s: State, action: Action): State {
       return { ...s, progressOpen: !s.progressOpen }
     // 書きかけの入力は破棄せずに復元する（§4.1.5）
     case 'openCreate':
-      return { ...s, createOpen: true, drawerOpen: false, menu: null }
+      // ガイドは作成オーバーレイの上に重なる。開いたままだと作成画面が隠れる
+      return { ...s, createOpen: true, helpOpen: false, drawerOpen: false, menu: null }
     case 'closeCreate':
       return { ...s, createOpen: false }
+    // 使い方ガイド（§4.8）。やりとりは画面側に閉じるため、ここでは開閉だけを持つ
+    case 'setHelp':
+      return { ...s, helpOpen: action.open, menu: null }
     case 'retryGeneration':
       return {
         ...s,

@@ -15,6 +15,13 @@ export function EmptyState() {
         <IconUpload className="h-4 w-4" />
         教材をアップロード
       </button>
+      {/* 講義が0件の時点が最も迷いやすい。ここにもガイドを置く（§4.8） */}
+      <button
+        onClick={() => dispatch({ type: 'setHelp', open: true })}
+        className="mt-4 text-sm text-slate-500 underline underline-offset-4 transition hover:text-slate-800"
+      >
+        使い方を見る
+      </button>
     </div>
   )
 }

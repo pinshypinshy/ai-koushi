@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { MAX_CHARS, MIN_CHARS, useStore } from '../store'
 import { Markdown } from '../components/Markdown'
-import { IconX } from '../components/Icons'
+import { IconHelp, IconX } from '../components/Icons'
 import { useIsMobile } from '../hooks/useMediaQuery'
 
 /** SC-03 講義作成オーバーレイ（§4.1）。タブではなく A-2 から開く一時的な画面。 */
@@ -18,17 +18,17 @@ export function CreateOverlay() {
   // Esc で閉じる。入力内容は保持する（§4.1.5）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !state.modal) dispatch({ type: 'closeCreate' })
+      if (e.key === 'Escape' && !state.modal && !state.helpOpen) dispatch({ type: 'closeCreate' })
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [dispatch, state.modal])
+  }, [dispatch, state.modal, state.helpOpen])
 
   const editor = (
     <textarea
       value={state.draftMarkdown}
       onChange={(e) => dispatch({ type: 'setDraft', markdown: e.target.value })}
-      placeholder="ここに参考書の内容を Markdown で貼り付けてください"
+      placeholder="教科書や授業スライドの本文を、ここに貼り付けてください"
       spellCheck={false}
       className="h-full w-full resize-none rounded-xl border border-slate-200 bg-white p-4 font-mono text-[13px] leading-relaxed outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
     />
@@ -78,6 +78,17 @@ export function CreateOverlay() {
           />
         </div>
 
+        {/* 使い方ガイド（§4.8）への導線。貼り付ける直前に読む位置へ置く（§4.1.1） */}
+        <div>
+          <button
+            onClick={() => dispatch({ type: 'setHelp', open: true })}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:border-indigo-400 hover:text-indigo-600"
+          >
+            <IconHelp className="h-4 w-4" />
+            使い方を見る
+          </button>
+        </div>
+
         {isMobile ? (
           <>
             <div className="inline-flex self-start rounded-lg border border-slate-200 bg-white p-0.5 text-xs font-medium">
@@ -98,7 +109,7 @@ export function CreateOverlay() {
         ) : (
           <div className="grid min-h-0 flex-1 grid-cols-2 gap-3">
             <div className="flex min-h-0 flex-col">
-              <span className="mb-1.5 text-xs font-medium text-slate-500">Markdown を貼り付け</span>
+              <span className="mb-1.5 text-xs font-medium text-slate-500">教材を貼り付け</span>
               <div className="min-h-0 flex-1">{editor}</div>
             </div>
             <div className="flex min-h-0 flex-col">
@@ -107,6 +118,8 @@ export function CreateOverlay() {
             </div>
           </div>
         )}
+
+        <p className="shrink-0 text-xs text-slate-500">Markdown 記法に対応しています。</p>
 
         <div className="flex shrink-0 items-center gap-4">
           <p className={`text-xs tabular-nums ${tooLong ? 'font-medium text-rose-600' : 'text-slate-500'}`}>

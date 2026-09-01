@@ -14,6 +14,7 @@ import { IconMenu, IconUser } from './components/Icons'
 import { Login } from './screens/Login'
 import { EmptyState } from './screens/EmptyState'
 import { CreateOverlay } from './screens/CreateOverlay'
+import { HelpGuide } from './screens/HelpGuide'
 import { Generating } from './screens/Generating'
 import { GenerateFailed } from './screens/GenerateFailed'
 import { LectureTab } from './screens/LectureTab'
@@ -313,6 +314,9 @@ function Shell() {
         {/* SC-03 講義作成オーバーレイ（§4.1）。タブバーごと覆う */}
         {state.createOpen && <CreateOverlay />}
 
+        {/* SC-17 使い方ガイド（§4.8）。作成オーバーレイの中からも開くため、その上に重ねる */}
+        {state.helpOpen && <HelpGuide />}
+
         <Dialogs />
       </div>
     )
@@ -344,6 +348,9 @@ function Shell() {
 
         {/* SC-03 講義作成オーバーレイ（§4.1）。サイドバーは残し、タブバーとメイン領域を覆う */}
         {state.createOpen && <CreateOverlay />}
+
+        {/* SC-17 使い方ガイド（§4.8）。作成オーバーレイの中からも開くため、その上に重ねる */}
+        {state.helpOpen && <HelpGuide />}
       </div>
 
       <Dialogs />

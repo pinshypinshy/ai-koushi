@@ -1,9 +1,9 @@
 import { useStore } from '../store'
 import { isDemo } from '../demo'
-import { IconDots, IconPlus, IconUser, IconX } from './Icons'
+import { IconDots, IconHelp, IconPlus, IconUser, IconX } from './Icons'
 import { UsageMeter } from './UsageMeter'
 
-/** A-1〜A-4（§3.4）。モバイルではドロワーとして表示する。 */
+/** A-1〜A-6（§3.4）。モバイルではドロワーとして表示する。 */
 export function Sidebar({ onClose }: { onClose?: () => void }) {
   const { state, dispatch } = useStore()
   // サンプルでは講義の作成・改名・削除を行わせない（保存先が無いため）
@@ -98,6 +98,20 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
           </ul>
         )}
       </nav>
+
+      {/* A-6 使い方ガイド（§4.8）。AI もサーバーも使わないため、サンプルでも開ける */}
+      <div className="border-t border-slate-800 px-3 py-2">
+        <button
+          onClick={() => {
+            dispatch({ type: 'setHelp', open: true })
+            onClose?.()
+          }}
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 transition hover:bg-slate-800"
+        >
+          <IconHelp className="h-4 w-4" />
+          使い方
+        </button>
+      </div>
 
       {/* 今月の利用状況（§8.2.3）。取得できるまでは何も出さない */}
       {state.usage && (
