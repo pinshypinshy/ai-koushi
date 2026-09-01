@@ -61,7 +61,7 @@ auth.get('/callback', async (c) => {
   if (profile.verified_email === false) {
     return c.redirect(`${c.env.APP_ORIGIN}/?auth_error=unverified`)
   }
-  if (!isAllowed(c.env.ALLOWED_EMAILS, profile.email)) {
+  if (!(await isAllowed(c.env.DB, profile.email))) {
     return c.redirect(`${c.env.APP_ORIGIN}/?auth_error=not_allowed`)
   }
 

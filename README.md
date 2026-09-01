@@ -217,7 +217,7 @@ ai-koushi/
     ├── wrangler.jsonc       D1 バインディング・モデルID・環境変数
     ├── .dev.vars            ローカル用シークレット（git 管理外）
     ├── migrations/          D1 のマイグレーション
-    ├── scripts/             ゲストアカウントの発行と再発行
+    ├── scripts/             許可リストの操作、ゲストアカウントの発行と再発行
     └── src/
         ├── index.ts         Hono のエントリとルーティング
         ├── env.ts           バインディングと環境変数の型

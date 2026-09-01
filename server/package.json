@@ -9,6 +9,9 @@
     "db:create": "wrangler d1 create ai-koushi",
     "db:migrate": "wrangler d1 migrations apply ai-koushi --local",
     "db:migrate:remote": "wrangler d1 migrations apply ai-koushi --remote",
+    "allow:add": "node scripts/allow-add.mjs",
+    "allow:list": "node scripts/allow-list.mjs",
+    "allow:remove": "node scripts/allow-remove.mjs",
     "guest:add": "node scripts/guest-add.mjs",
     "guest:reset": "node scripts/guest-reset.mjs"
   },

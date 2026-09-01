@@ -20,8 +20,6 @@ export interface Env {
   GOOGLE_CLIENT_ID: string
   GOOGLE_CLIENT_SECRET: string
   SESSION_SECRET: string
-  /** ログインを許可するアドレスのカンマ区切り（§4.6 利用者制限） */
-  ALLOWED_EMAILS: string
   GEMINI_API_KEY: string
 }
 

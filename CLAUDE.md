@@ -25,6 +25,9 @@
 | `npm run typecheck` | server |
 | `npm run build` | app（型チェックを含む） |
 | `npm run db:migrate` | server。ローカル D1 へ適用 |
+| `npm run allow:add -- <アドレス> "<メモ>"` | server。Google サインインを許可する（本番は `--remote`） |
+| `npm run allow:list` | server。許可リストの一覧 |
+| `npm run allow:remove -- <アドレス>` | server。許可を取り消す。発行済みセッションは残る |
 | `npm run guest:add -- <ID> "<表示名>"` | server。ゲストアカウントを発行（本番は `--remote`） |
 | `npm run guest:reset -- <ID>` | server。パスワード再発行。利用者の行は触らないのでデータは残る |
 
