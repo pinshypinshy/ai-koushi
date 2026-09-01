@@ -9,7 +9,8 @@
     "db:create": "wrangler d1 create ai-koushi",
     "db:migrate": "wrangler d1 migrations apply ai-koushi --local",
     "db:migrate:remote": "wrangler d1 migrations apply ai-koushi --remote",
-    "guest:add": "node scripts/guest-add.mjs"
+    "guest:add": "node scripts/guest-add.mjs",
+    "guest:reset": "node scripts/guest-reset.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.19.0",
