@@ -60,21 +60,38 @@ export function parseLoginId(loginId) {
   return loginId
 }
 
-/** SQL をファイル経由で流す。結果を読みたい場合は json:true を渡す */
+/**
+ * SQL を流す。結果を読みたい場合は json:true を渡す。
+ *
+ * 読み取りだけ --command を使うのは、--remote と --file を組み合わせると
+ * 「ファイルの取り込み（import）」という別経路に入り、SELECT の行が返らないため。
+ * ローカルでは行が返るので、この違いは本番でだけ表面化する。実際、guest:reset の
+ * 存在確認が素通りし、存在しないゲストのパスワードを発行してしまった。
+ * 書き込みは複数文を流すためファイル経由を維持する。
+ */
 export function runSql(sql, { remote, json = false }) {
-  const file = join(tmpdir(), `guest-${Date.now()}.sql`)
-  writeFileSync(file, sql)
-  try {
-    const args = ['wrangler', 'd1', 'execute', 'ai-koushi', remote ? '--remote' : '--local', '--file', file]
-    if (json) args.push('--json')
-    const out = execFileSync('npx', args, {
-      stdio: json ? ['ignore', 'pipe', 'inherit'] : 'inherit',
-      encoding: 'utf8',
-    })
-    if (!json) return null
+  const target = remote ? '--remote' : '--local'
+
+  if (json) {
+    const out = execFileSync(
+      'npx',
+      ['wrangler', 'd1', 'execute', 'ai-koushi', target, '--json', '--command', sql],
+      { stdio: ['ignore', 'pipe', 'inherit'], encoding: 'utf8' },
+    )
     // 先頭に案内文が混ざることがあるため、JSON の開始位置から読む
     const start = out.indexOf('[')
     return start >= 0 ? JSON.parse(out.slice(start)) : null
+  }
+
+  const file = join(tmpdir(), `guest-${Date.now()}.sql`)
+  writeFileSync(file, sql)
+  try {
+    execFileSync(
+      'npx',
+      ['wrangler', 'd1', 'execute', 'ai-koushi', target, '--file', file],
+      { stdio: 'inherit', encoding: 'utf8' },
+    )
+    return null
   } finally {
     unlinkSync(file)
   }
