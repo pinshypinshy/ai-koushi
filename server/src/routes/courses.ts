@@ -1,16 +1,18 @@
 import { Hono } from 'hono'
 import type { AppEnv } from '../env'
-import type { CreateCourseRequest } from '../../../shared/api'
+import type { CreateCourseRequest, RenameCourseRequest } from '../../../shared/api'
 import { requireUser } from '../auth/session'
 import {
   countCoursesSince,
   createCourse,
+  deleteCourse,
   getCourseDetail,
   getCourseState,
   getMaterial,
   listCourses,
   markCourseFailed,
   markQuizFailed,
+  renameCourse,
   resetForRetry,
   resetQuizForRetry,
   setWorkflowId,
@@ -222,4 +224,28 @@ courses.post('/courses/:id/quiz/retry', requireUser, async (c) => {
   }
 
   return c.json({ courseId }, 202)
+})
+
+/**
+ * 講義の削除（§4.5）。ステップ・対話・設問・解答記録も併せて消える。
+ * 復元手段は用意しない（§3.5 SC-14）。
+ */
+courses.delete('/courses/:id', requireUser, async (c) => {
+  const user = c.get('user')
+  const deleted = await deleteCourse(c.env.DB, user.id, c.req.param('id'))
+  if (!deleted) return c.json({ error: 'not_found', message: '講義が見つかりません' }, 404)
+  return c.body(null, 204)
+})
+
+/** 名前の変更（§4.5） */
+courses.patch('/courses/:id', requireUser, async (c) => {
+  const user = c.get('user')
+  const body = await c.req.json<RenameCourseRequest>().catch(() => null)
+  const title = body?.title?.trim()
+  if (!title) {
+    return c.json({ error: 'invalid_request', message: 'タイトルが空です' }, 400)
+  }
+  const renamed = await renameCourse(c.env.DB, user.id, c.req.param('id'), title)
+  if (!renamed) return c.json({ error: 'not_found', message: '講義が見つかりません' }, 404)
+  return c.json({ courseId: c.req.param('id'), title })
 })

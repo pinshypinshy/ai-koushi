@@ -122,3 +122,43 @@ export interface CreateCourseRequest {
 export interface CreateCourseResponse {
   courseId: string
 }
+
+/**
+ * 講義本文（③）・質問応答（④）のストリーミング1行ぶん。
+ *
+ * 応答は NDJSON（1行1件のJSON）で流す。文字の断片だけでなく、保存された発言の id と
+ * 途中で発生した失敗を同じ経路で伝えるためである（§5.7「ストリーミング中断」）。
+ */
+export type LectureStreamLine =
+  | { delta: string }
+  | { done: ApiMessage }
+  | { error: { message: string; partialSaved: boolean } }
+
+/** 質問・応答の送信（§4.2.4） */
+export interface SendMessageRequest {
+  text: string
+}
+
+/** 各設問に対する最新の解答（§4.3.3）。復習モードの抽出に使う（§4.3.4） */
+export interface AttemptSummary {
+  questionId: string
+  isCorrect: boolean
+  answeredAt: number
+}
+
+/**
+ * 確認テストの出題（§4.3）。
+ * 出題順のシャッフルは受験のたびにクライアントで行う（Q-6）。ここは order_index 順で返す。
+ */
+export interface QuizResponse {
+  questions: ApiQuestion[]
+  latestAttempts: AttemptSummary[]
+}
+
+export interface AttemptRequest {
+  selectedChoiceId: string
+}
+
+export interface RenameCourseRequest {
+  title: string
+}

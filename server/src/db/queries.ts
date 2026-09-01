@@ -1,11 +1,16 @@
 import type {
+  ApiChoice,
   ApiMessage,
+  ApiQuestion,
   ApiStep,
+  AttemptResult,
+  AttemptSummary,
   CourseDetail,
   CourseSummary,
   MaterialResponse,
+  QuizResponse,
 } from '../../../shared/api'
-import type { OutlineResult, OutlineStep, QuizResult } from '../ai/types'
+import type { OutlineResult, OutlineStep, QuizResult, StepSummary, Turn } from '../ai/types'
 
 /**
  * REQUIREMENTS.md §6.4「主要クエリ」に対応する。
@@ -460,4 +465,370 @@ export async function countCoursesSince(
     .bind(userId, since)
     .first<{ n: number }>()
   return row?.n ?? 0
+}
+
+// ----------------------------------------------------------------- 受講（③④⑤）
+
+/** ③④のプロンプトに載せる材料（§5.4 のコンテキスト構成） */
+export interface LectureContextRow {
+  material: string
+  outline: OutlineStep[]
+  completedSummaries: StepSummary[]
+  currentStep: OutlineStep
+  currentStepId: string
+  history: Turn[]
+}
+
+/**
+ * 現在のステップを解説するために必要なものを一度に集める。
+ *
+ * 過去のステップは全文ではなく⑤の要約だけを載せる（§5.4「進捗」層）。
+ * 対話は現ステップ内のみを載せる。ステップをまたいで全文を積むと、
+ * 教材と骨子で既に大きいコンテキストがさらに膨らみ、§8.2 の想定を超える。
+ */
+export async function loadLectureContext(
+  db: D1Database,
+  userId: string,
+  courseId: string,
+): Promise<LectureContextRow | null> {
+  const [courseRes, materialRes, stepRes] = await db.batch([
+    db
+      .prepare('SELECT current_step_id FROM courses WHERE id = ?1 AND user_id = ?2')
+      .bind(courseId, userId),
+    db.prepare('SELECT raw_markdown FROM materials WHERE course_id = ?1').bind(courseId),
+    db
+      .prepare(
+        `SELECT id, order_index, title, objective, key_points, source_ref, status, summary
+         FROM steps WHERE course_id = ?1 ORDER BY order_index`,
+      )
+      .bind(courseId),
+  ])
+
+  const course = (courseRes.results as unknown as { current_step_id: string | null }[])[0]
+  if (!course?.current_step_id) return null
+  const material = (materialRes.results as unknown as { raw_markdown: string }[])[0]?.raw_markdown
+  if (material === undefined) return null
+
+  const rows = stepRes.results as unknown as (StepRow & { summary: string | null })[]
+  if (rows.length === 0) return null
+
+  const toOutline = (row: StepRow): OutlineStep => ({
+    orderIndex: row.order_index,
+    title: row.title,
+    objective: row.objective,
+    keyPoints: parseKeyPoints(row.key_points),
+    sourceRef: row.source_ref ?? '',
+  })
+
+  const currentRow = rows.find((r) => r.id === course.current_step_id)
+  if (!currentRow) return null
+
+  const { results: messageRows } = await db
+    .prepare(
+      'SELECT role, content FROM messages WHERE step_id = ?1 ORDER BY created_at, rowid',
+    )
+    .bind(currentRow.id)
+    .all<{ role: string; content: string }>()
+
+  return {
+    material,
+    outline: rows.map(toOutline),
+    completedSummaries: rows
+      .filter((r) => r.status === 'completed' && r.summary)
+      .map((r): StepSummary => ({
+        orderIndex: r.order_index,
+        title: r.title,
+        summary: r.summary ?? '',
+      })),
+    currentStep: toOutline(currentRow),
+    currentStepId: currentRow.id,
+    history: messageRows.map((m): Turn => ({ role: m.role as Turn['role'], content: m.content })),
+  }
+}
+
+/**
+ * 発言を1件保存する。
+ * 併せてステップを in_progress にするのは、受講が始まった時点が
+ * 「現在のステップ」の実体であるため（骨子の保存時点ではまだ着手していない）。
+ */
+export async function insertMessage(
+  db: D1Database,
+  courseId: string,
+  stepId: string,
+  role: ApiMessage['role'],
+  content: string,
+): Promise<ApiMessage> {
+  const message: ApiMessage = {
+    id: crypto.randomUUID(),
+    stepId,
+    role,
+    content,
+    createdAt: Date.now(),
+  }
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO messages (id, step_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4, ?5)`,
+      )
+      .bind(message.id, stepId, role, content, message.createdAt),
+    db
+      .prepare(
+        `UPDATE steps SET status = 'in_progress' WHERE id = ?1 AND status = 'not_started'`,
+      )
+      .bind(stepId),
+    db.prepare('UPDATE courses SET updated_at = ?2 WHERE id = ?1').bind(courseId, message.createdAt),
+  ])
+  return message
+}
+
+/**
+ * ステップを完了にし、現在地を次へ移す（§4.2.2）。
+ * 完了の判定はユーザーが次へ進むことに同意した時点であり、確認テストは条件に含めない（Q-4）。
+ */
+export async function completeStep(
+  db: D1Database,
+  courseId: string,
+  stepId: string,
+  summary: string,
+): Promise<void> {
+  const now = Date.now()
+  const next = await db
+    .prepare(
+      `SELECT id FROM steps
+       WHERE course_id = ?1 AND order_index > (SELECT order_index FROM steps WHERE id = ?2)
+       ORDER BY order_index LIMIT 1`,
+    )
+    .bind(courseId, stepId)
+    .first<{ id: string }>()
+
+  const statements = [
+    db
+      .prepare(
+        `UPDATE steps SET status = 'completed', summary = ?2, completed_at = ?3 WHERE id = ?1`,
+      )
+      .bind(stepId, summary, now),
+    db
+      .prepare('UPDATE courses SET current_step_id = ?2, updated_at = ?3 WHERE id = ?1')
+      .bind(courseId, next?.id ?? null, now),
+  ]
+  if (next) {
+    statements.push(
+      db
+        .prepare(`UPDATE steps SET status = 'in_progress' WHERE id = ?1 AND status = 'not_started'`)
+        .bind(next.id),
+    )
+  }
+  await db.batch(statements)
+}
+
+/** 現在のステップが指定されたものと一致するか。完了済みステップへの二重操作を弾く */
+export async function isCurrentStep(
+  db: D1Database,
+  userId: string,
+  courseId: string,
+  stepId: string,
+): Promise<boolean> {
+  const row = await db
+    .prepare('SELECT current_step_id FROM courses WHERE id = ?1 AND user_id = ?2')
+    .bind(courseId, userId)
+    .first<{ current_step_id: string | null }>()
+  return row?.current_step_id === stepId
+}
+
+/** §8.2.3「講義1件あたりの累積トークン」。暴走時に当該講義の生成を止めるための集計 */
+export async function courseTokenTotals(
+  db: D1Database,
+  courseId: string,
+): Promise<{ input: number; output: number }> {
+  const row = await db
+    .prepare(
+      `SELECT COALESCE(SUM(input_tokens), 0) AS input, COALESCE(SUM(output_tokens), 0) AS output
+       FROM ai_usage_logs WHERE course_id = ?1`,
+    )
+    .bind(courseId)
+    .first<{ input: number; output: number }>()
+  return { input: row?.input ?? 0, output: row?.output ?? 0 }
+}
+
+// ------------------------------------------------------------------ 確認テスト
+
+/**
+ * 出題（§4.3.1）。正解と解説を含めないのは、「回答する」を押す前に
+ * クライアント側で答えが判明してしまうと §4.3.2 の判定が成立しないため。
+ * 出題順のシャッフルは受験のたびにクライアントで行う（Q-6）。
+ */
+export async function getQuiz(
+  db: D1Database,
+  userId: string,
+  courseId: string,
+): Promise<QuizResponse | null> {
+  const owned = await db
+    .prepare('SELECT id FROM courses WHERE id = ?1 AND user_id = ?2')
+    .bind(courseId, userId)
+    .first<{ id: string }>()
+  if (!owned) return null
+
+  const [questionRes, choiceRes, stepRes, attemptRes] = await db.batch([
+    db
+      .prepare('SELECT id, stem FROM questions WHERE course_id = ?1 ORDER BY order_index')
+      .bind(courseId),
+    db
+      .prepare(
+        `SELECT ch.id, ch.question_id, ch.body
+         FROM choices ch JOIN questions q ON q.id = ch.question_id
+         WHERE q.course_id = ?1 ORDER BY q.order_index, ch.order_index`,
+      )
+      .bind(courseId),
+    db
+      .prepare(
+        `SELECT qs.question_id, qs.step_id
+         FROM question_steps qs JOIN questions q ON q.id = qs.question_id
+         WHERE q.course_id = ?1`,
+      )
+      .bind(courseId),
+    // 設問ごとに answered_at が最大の解答（§6.4 復習モード対象）
+    db
+      .prepare(
+        `SELECT a.question_id, a.is_correct, a.answered_at
+         FROM attempts a JOIN questions q ON q.id = a.question_id
+         WHERE q.course_id = ?1 AND a.user_id = ?2
+           AND a.answered_at = (
+             SELECT MAX(a2.answered_at) FROM attempts a2
+             WHERE a2.question_id = a.question_id AND a2.user_id = a.user_id
+           )`,
+      )
+      .bind(courseId, userId),
+  ])
+
+  const choicesByQuestion = new Map<string, ApiChoice[]>()
+  for (const row of choiceRes.results as unknown as {
+    id: string
+    question_id: string
+    body: string
+  }[]) {
+    const list = choicesByQuestion.get(row.question_id) ?? []
+    list.push({ id: row.id, body: row.body })
+    choicesByQuestion.set(row.question_id, list)
+  }
+
+  const stepsByQuestion = new Map<string, string[]>()
+  for (const row of stepRes.results as unknown as { question_id: string; step_id: string }[]) {
+    const list = stepsByQuestion.get(row.question_id) ?? []
+    list.push(row.step_id)
+    stepsByQuestion.set(row.question_id, list)
+  }
+
+  const questions = (questionRes.results as unknown as { id: string; stem: string }[]).map(
+    (row): ApiQuestion => ({
+      id: row.id,
+      stem: row.stem,
+      choices: choicesByQuestion.get(row.id) ?? [],
+      coveredStepIds: stepsByQuestion.get(row.id) ?? [],
+    }),
+  )
+
+  const latestAttempts = (
+    attemptRes.results as unknown as {
+      question_id: string
+      is_correct: number
+      answered_at: number
+    }[]
+  ).map(
+    (row): AttemptSummary => ({
+      questionId: row.question_id,
+      isCorrect: row.is_correct === 1,
+      answeredAt: row.answered_at,
+    }),
+  )
+
+  return { questions, latestAttempts }
+}
+
+/** 解答が不正（選択肢が別の設問のものだった）ことを表す。呼び出し側で 400 に変換する */
+export class InvalidChoiceError extends Error {}
+
+/**
+ * 解答を判定して記録する（§4.3.2 / §4.3.3）。
+ * 上書きではなく追記するため、同一設問の複数回挑戦の履歴が残る。
+ */
+export async function gradeAttempt(
+  db: D1Database,
+  userId: string,
+  questionId: string,
+  selectedChoiceId: string,
+): Promise<AttemptResult | null> {
+  const question = await db
+    .prepare(
+      `SELECT q.id, q.explanation FROM questions q
+       JOIN courses c ON c.id = q.course_id
+       WHERE q.id = ?1 AND c.user_id = ?2`,
+    )
+    .bind(questionId, userId)
+    .first<{ id: string; explanation: string }>()
+  if (!question) return null
+
+  const { results } = await db
+    .prepare('SELECT id, is_correct FROM choices WHERE question_id = ?1')
+    .bind(questionId)
+    .all<{ id: string; is_correct: number }>()
+
+  const selected = results.find((r) => r.id === selectedChoiceId)
+  if (!selected) throw new InvalidChoiceError('選択肢がこの設問のものではありません')
+  const correct = results.find((r) => r.is_correct === 1)
+
+  const answeredAt = Date.now()
+  await db
+    .prepare(
+      `INSERT INTO attempts (id, user_id, question_id, selected_choice_id, is_correct, answered_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      userId,
+      questionId,
+      selectedChoiceId,
+      selected.is_correct === 1 ? 1 : 0,
+      answeredAt,
+    )
+    .run()
+
+  return {
+    questionId,
+    selectedChoiceId,
+    correctChoiceId: correct?.id ?? '',
+    isCorrect: selected.is_correct === 1,
+    explanation: question.explanation,
+    answeredAt,
+  }
+}
+
+// ------------------------------------------------------------------ 講義管理
+
+/**
+ * 講義の削除（§4.5）。ステップ・対話・設問・解答記録は外部キーの連鎖削除で消える。
+ * ai_usage_logs だけは残す。当月の課金実績が消えると §8.2.4 の上限判定が狂うため。
+ */
+export async function deleteCourse(
+  db: D1Database,
+  userId: string,
+  courseId: string,
+): Promise<boolean> {
+  const res = await db
+    .prepare('DELETE FROM courses WHERE id = ?1 AND user_id = ?2')
+    .bind(courseId, userId)
+    .run()
+  return (res.meta.changes ?? 0) > 0
+}
+
+export async function renameCourse(
+  db: D1Database,
+  userId: string,
+  courseId: string,
+  title: string,
+): Promise<boolean> {
+  const res = await db
+    .prepare('UPDATE courses SET title = ?3, updated_at = ?4 WHERE id = ?1 AND user_id = ?2')
+    .bind(courseId, userId, title, Date.now())
+    .run()
+  return (res.meta.changes ?? 0) > 0
 }
