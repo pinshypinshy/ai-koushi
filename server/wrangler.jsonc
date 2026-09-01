@@ -6,8 +6,26 @@
   // @google/genai が Node 互換 API を参照するため（Q-22 の検証対象）
   "compatibility_flags": ["nodejs_compat"],
 
+  // 独自ドメインで配信する。Cloudflare で取得したドメインのため、
+  // ネームサーバーの向け替えは不要
+  "routes": [{ "pattern": "ai-koushi.yuki-hiraishi.com", "custom_domain": true }],
+  // 入口を独自ドメイン1つに閉じる。workers.dev の住所も同時に生きていると、
+  // そちらから入った利用者は Cookie の載るオリジンとログインの戻り先がずれ、
+  // ログインが往復し続ける状態になる
+  "workers_dev": false,
+
   // §8.4 ログ要件。Workers Observability を有効にする
   "observability": { "enabled": true },
+
+  // §7.1「React SPA を静的アセットとして Workers から配信する」。
+  // directory はこの設定ファイルからの相対パス（app 側の `npm run build` の出力）。
+  "assets": {
+    "directory": "../app/dist",
+    // SPA なので、アセットに無いパスは index.html を返してクライアント側で解決する
+    "not_found_handling": "single-page-application",
+    // これが無いと /api と /auth まで index.html が返る。API は Worker が先に受ける
+    "run_worker_first": ["/api/*", "/auth/*"]
+  },
 
   // §7.4 講義作成ジョブ。①骨子生成 → ②確認テスト生成をステップ単位で永続化する
   "workflows": [
@@ -22,15 +40,18 @@
     {
       "binding": "DB",
       "database_name": "ai-koushi",
-      // `npm run db:create` の出力を貼る。ローカル開発だけなら仮の値でも動く
-      "database_id": "PLACEHOLDER_RUN_DB_CREATE",
+      // `npm run db:create` の出力。識別子であって秘密ではない
+      "database_id": "bd71b07b-677b-4151-aa50-a103a138dccf",
       "migrations_dir": "migrations"
     }
   ],
 
   // 秘密でない設定値。秘密は .dev.vars（ローカル）と wrangler secret（本番）に置く
   "vars": {
-    "APP_ORIGIN": "http://localhost:5173",
+    // 本番の値を正とし、ローカルは .dev.vars の APP_ORIGIN で上書きする。
+    // この値は Cookie の Secure 判定・OAuth の戻り先・dev ルートの有無を
+    // まとめて決めるため、環境の識別子はこれ1つに保つ
+    "APP_ORIGIN": "https://ai-koushi.yuki-hiraishi.com",
     "MODEL_OUTLINE": "gemini-3.1-pro-preview",
     "MODEL_QUIZ": "gemini-3.1-pro-preview",
     "MODEL_LECTURE": "gemini-3.7-flash",

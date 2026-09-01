@@ -24,7 +24,16 @@ app.route('/api', lecture)
 app.route('/api', quiz)
 app.route('/api', usage)
 
-// 開発用。製品には含めない（§3「画面一覧」の DevPanel と同じ位置づけ）
+/**
+ * 開発用。製品には含めない（§3「画面一覧」の DevPanel と同じ位置づけ）。
+ * 本番でも到達できると、モデル一覧の取得のように課金の走る口が外に出る。
+ * 判定に APP_ORIGIN を使うのは、環境を識別する値をこれ1つに保つため
+ * （Cookie の Secure 判定も同じ値を見ている → auth/session.ts の isSecure）。
+ */
+app.use('/api/dev/*', async (c, next) => {
+  if (!c.env.APP_ORIGIN.startsWith('http://localhost')) return c.notFound()
+  await next()
+})
 app.route('/api/dev', dev)
 
 app.notFound((c) => c.json({ error: 'not_found', message: 'エンドポイントが存在しません' }, 404))
