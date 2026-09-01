@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import { ApiFailure, api, courseFromDetail, streamTurn } from '../api'
 import { useStore } from '../store'
+import { useUsageRefresh } from './useUsageRefresh'
 import type { Course } from '../types'
 
 /**
@@ -11,6 +12,7 @@ import type { Course } from '../types'
  */
 export function useLectureTurn(course: Course) {
   const { state, dispatch } = useStore()
+  const refreshUsage = useUsageRefresh()
   const running = state.streaming !== null
   const stepId = course.currentStepId
 
@@ -61,11 +63,15 @@ export function useLectureTurn(course: Course) {
         flush()
         dispatch({ type: 'messageAppended', courseId: course.id, message: saved })
         dispatch({ type: 'streamEnd' })
+        // このターンで消費した分をサイドバーの表示へ反映する（§8.2.4）
+        refreshUsage()
       } catch (err) {
         dispatch({
           type: 'streamFailed',
           message: err instanceof ApiFailure ? err.message : '応答を取得できませんでした',
         })
+        // 中断しても部分生成分は課金されている。利用状況も取り直す（§8.2.4）
+        refreshUsage()
         // 中断しても部分生成分は保存されている（§5.7）。取り直して表示を揃える
         api
           .course(course.id)
@@ -73,7 +79,7 @@ export function useLectureTurn(course: Course) {
           .catch(() => undefined)
       }
     },
-    [course.id, stepId, running, dispatch],
+    [course.id, stepId, running, dispatch, refreshUsage],
   )
 
   return {

@@ -27,6 +27,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           user: { name: res.user.displayName, email: res.user.email },
           courses: selected ? courses.map((c) => (c.id === selected.id ? selected : c)) : courses,
           selectedId: selected?.id ?? null,
+          usage: res.usage,
         })
       })
       .catch(() => {

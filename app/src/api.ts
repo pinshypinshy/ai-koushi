@@ -10,6 +10,7 @@ import type {
   MaterialResponse,
   QuizResponse,
   SendMessageRequest,
+  UsageSummary,
 } from '../../shared/api'
 import type { Course } from './types'
 import {
@@ -20,6 +21,7 @@ import {
   demoMaterial,
   demoQuiz,
   demoStreamTurn,
+  demoUsage,
   isDemo,
 } from './demo'
 
@@ -69,6 +71,11 @@ export const api = {
       : request<BootstrapResponse>(
           courseId ? `/api/bootstrap?courseId=${encodeURIComponent(courseId)}` : '/api/bootstrap',
         ),
+  /**
+   * 今月の利用状況（§8.2.3）。起動時は bootstrap に同梱されるため、
+   * ここを叩くのは AI を消費した後に取り直すときだけ。
+   */
+  usage: () => (isDemo() ? Promise.resolve(demoUsage()) : request<UsageSummary>('/api/usage')),
   course: (id: string) =>
     isDemo()
       ? Promise.resolve(demoCourse())

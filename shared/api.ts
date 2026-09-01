@@ -97,11 +97,33 @@ export interface AttemptResult {
   answeredAt: number
 }
 
+/**
+ * 今月の利用状況（§8.2.3 の上限に対する消費分）。サイドバーの進捗表示に使う。
+ *
+ * 上限値も併せて返すのは、上限が利用者の種別で異なるため（Google $15・8件 ／
+ * ゲスト $3・2件、Q-26）。クライアントに上限を持たせると種別の判定が画面側に漏れる。
+ */
+export interface UsageSummary {
+  /**
+   * 推定コストの月間合計（USD）。ai_usage_logs の積み上げであり、
+   * 課金プラットフォーム側の実額（§8.2.4 の二層目）とは一致しない。
+   */
+  costUsd: number
+  costLimitUsd: number
+  /** 今月に作成した講義の件数。再試行は新規作成として数えない */
+  courses: number
+  courseLimit: number
+  /** 集計期間の開始時刻（JST の月初）。「今月」の区切りを利用者の感覚に合わせる */
+  periodStart: number
+}
+
 /** §6.4「初回ロード」。講義一覧・選択中講義・ユーザーを1往復で返す */
 export interface BootstrapResponse {
   user: ApiUser
   courses: CourseSummary[]
   selected: CourseDetail | null
+  /** 起動直後からサイドバーに出せるよう、利用状況も同じ応答に載せる（§7.6） */
+  usage: UsageSummary
 }
 
 export interface ApiError {

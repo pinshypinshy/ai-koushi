@@ -9,6 +9,7 @@ import type {
   CourseSummary,
   MaterialResponse,
   QuizResponse,
+  UsageSummary,
 } from '../../../shared/api'
 import { DEMO_MATERIAL, DEMO_QUESTIONS, DEMO_STEPS, stepId } from './data'
 
@@ -104,11 +105,26 @@ export function demoCourse(): CourseDetail {
   return { ...summary(), currentStepId: s.currentStepId, steps: s.steps, messages: s.messages }
 }
 
+/**
+ * サンプルの利用状況。実在の消費ではないため、上限の手前で止まる値を固定で置く。
+ * 警告色（80%以上）に入らない水準にしてあるのは、通常時の見え方を伝える画面のため。
+ */
+export function demoUsage(): UsageSummary {
+  return {
+    costUsd: 2.4,
+    costLimitUsd: 15,
+    courses: 1,
+    courseLimit: 8,
+    periodStart: Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1),
+  }
+}
+
 export function demoBootstrap(): BootstrapResponse {
   return {
     user: { id: 'demo-user', email: 'sample@example.com', displayName: 'サンプル' },
     courses: [summary()],
     selected: demoCourse(),
+    usage: demoUsage(),
   }
 }
 

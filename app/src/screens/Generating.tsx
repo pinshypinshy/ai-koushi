@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useStore } from '../store'
 import { api, courseFromDetail } from '../api'
+import { useUsageRefresh } from '../hooks/useUsageRefresh'
 import type { Course } from '../types'
 
 const PHASES = [
@@ -11,6 +12,7 @@ const PHASES = [
 /** SC-05 生成中。§7.4「フロントエンドは2秒間隔でポーリングする」 */
 export function Generating({ course }: { course: Course }) {
   const { dispatch } = useStore()
+  const refreshUsage = useUsageRefresh()
   const activeIndex = course.phase === 'quiz' ? 1 : 0
 
   useEffect(() => {
@@ -19,7 +21,10 @@ export function Generating({ course }: { course: Course }) {
       api
         .course(course.id)
         .then((detail) => {
-          if (alive) dispatch({ type: 'courseUpdated', course: courseFromDetail(detail) })
+          if (!alive) return
+          dispatch({ type: 'courseUpdated', course: courseFromDetail(detail) })
+          // 生成が終わった時点で①②の計上も済んでいる。利用状況を取り直す（§8.2.4）
+          if (detail.status !== 'generating') refreshUsage()
         })
         .catch(() => {
           // 一時的な失敗は次の周期で拾い直す。生成はサーバー側で続いている（§4.1.6 途中離脱）
@@ -29,7 +34,7 @@ export function Generating({ course }: { course: Course }) {
       alive = false
       clearInterval(timer)
     }
-  }, [course.id, dispatch])
+  }, [course.id, dispatch, refreshUsage])
 
   return (
     <div className="flex h-full flex-col items-center justify-center px-6 text-center">

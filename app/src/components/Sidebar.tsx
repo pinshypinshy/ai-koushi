@@ -1,6 +1,7 @@
 import { useStore } from '../store'
 import { isDemo } from '../demo'
 import { IconDots, IconPlus, IconUser, IconX } from './Icons'
+import { UsageMeter } from './UsageMeter'
 
 /** A-1〜A-4（§3.4）。モバイルではドロワーとして表示する。 */
 export function Sidebar({ onClose }: { onClose?: () => void }) {
@@ -97,6 +98,13 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
           </ul>
         )}
       </nav>
+
+      {/* 今月の利用状況（§8.2.3）。取得できるまでは何も出さない */}
+      {state.usage && (
+        <div className="border-t border-slate-800 px-5 py-3">
+          <UsageMeter usage={state.usage} />
+        </div>
+      )}
 
       <div className="border-t border-slate-800 p-3">
         <button

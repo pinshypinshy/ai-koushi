@@ -3,7 +3,6 @@ import type { AppEnv } from '../env'
 import type { CreateCourseRequest, RenameCourseRequest } from '../../../shared/api'
 import { requireUser } from '../auth/session'
 import {
-  countCoursesSince,
   createCourse,
   deleteCourse,
   getCourseDetail,
@@ -17,29 +16,13 @@ import {
   resetQuizForRetry,
   setWorkflowId,
 } from '../db/queries'
-import { monthlyCostUsd } from '../ai/usage'
+import { getUsageSummary, type UserKind } from '../limits'
 
 export const courses = new Hono<AppEnv>()
 
 /** §4.1.2 の入力制約。dev ルートも同じ値を参照する */
 export const MATERIAL_MIN_CHARS = 500
 export const MATERIAL_MAX_CHARS = 80_000
-
-/** §8.2.3 の上限値。ゲストを絞るのは、費用が利用者ごとに積み上がるため（Q-26） */
-const LIMITS = {
-  google: { courses: 8, costUsd: 15 },
-  guest: { courses: 2, costUsd: 3 },
-} as const
-
-/**
- * 月の境界は JST で判定する。利用者の「今月」の感覚に合わせるためであり、
- * 課金プラットフォーム側の集計期間（§8.2.4 の二層目）と一致させる目的ではない。
- */
-function monthStartMs(now: number): number {
-  const JST_OFFSET_MS = 9 * 60 * 60 * 1000
-  const jst = new Date(now + JST_OFFSET_MS)
-  return Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), 1) - JST_OFFSET_MS
-}
 
 /**
  * §8.2.4「月間コストが100%に達したら新規の講義作成をブロックする」。
@@ -51,21 +34,16 @@ function monthStartMs(now: number): number {
  */
 async function creationBlockedReason(
   db: D1Database,
-  user: { id: string; kind: 'google' | 'guest' },
+  user: { id: string; kind: UserKind },
   countsAsNewCourse: boolean,
 ): Promise<string | null> {
-  const since = monthStartMs(Date.now())
-  const limit = LIMITS[user.kind]
+  const usage = await getUsageSummary(db, user)
 
-  const cost = await monthlyCostUsd(db, user.id, since)
-  if (cost >= limit.costUsd) {
-    return `今月のAI利用額が上限（$${limit.costUsd}）に達したため、新しい生成を行えません。`
+  if (usage.costUsd >= usage.costLimitUsd) {
+    return `今月のAI利用額が上限（$${usage.costLimitUsd}）に達したため、新しい生成を行えません。`
   }
-  if (countsAsNewCourse) {
-    const count = await countCoursesSince(db, user.id, since)
-    if (count >= limit.courses) {
-      return `今月の講義作成数が上限（${limit.courses}件）に達しています。`
-    }
+  if (countsAsNewCourse && usage.courses >= usage.courseLimit) {
+    return `今月の講義作成数が上限（${usage.courseLimit}件）に達しています。`
   }
   return null
 }
@@ -86,7 +64,9 @@ courses.get('/bootstrap', requireUser, async (c) => {
   if (requested && !selected) {
     return c.json({ error: 'not_found', message: '講義が見つかりません' }, 404)
   }
-  return c.json({ user, courses: list, selected })
+  // 利用状況も同じ応答に載せる。起動直後からサイドバーに出すため（§8.2.4）
+  const usage = await getUsageSummary(c.env.DB, user)
+  return c.json({ user, courses: list, selected, usage })
 })
 
 courses.get('/courses/:id', requireUser, async (c) => {

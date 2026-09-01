@@ -1,5 +1,5 @@
 import { createContext, useContext, type Dispatch } from 'react'
-import type { AttemptResult } from '../../shared/api'
+import type { AttemptResult, UsageSummary } from '../../shared/api'
 import type { Attempt, Course, Message, Question, Tab, User } from './types'
 
 /** 教材の文字数制約（§4.1.2） */
@@ -48,6 +48,8 @@ export interface State {
   booted: boolean
   user: User | null
   courses: Course[]
+  /** 今月の利用状況（§8.2.3）。サイドバーの進捗表示に使う。取得できるまでは null */
+  usage: UsageSummary | null
   selectedCourseId: string | null
   tab: Tab
   quiz: QuizState
@@ -85,6 +87,7 @@ export function initialState(): State {
     booted: false,
     user: null,
     courses: [],
+    usage: null,
     selectedCourseId: null,
     tab: 'lecture',
     quiz: emptyQuiz,
@@ -105,7 +108,15 @@ export function initialState(): State {
 export type Action =
   | { type: 'logout' }
   /** 起動時の /api/bootstrap の結果 */
-  | { type: 'bootstrapped'; user: User; courses: Course[]; selectedId: string | null }
+  | {
+      type: 'bootstrapped'
+      user: User
+      courses: Course[]
+      selectedId: string | null
+      usage: UsageSummary
+    }
+  /** AI を消費した後に取り直した利用状況（講義の生成完了・受講の応答完了） */
+  | { type: 'usageUpdated'; usage: UsageSummary }
   /** 未ログイン、または起動時の問い合わせに失敗した */
   | { type: 'bootFailed' }
   /** サーバーから取り直した講義で置き換える（選択時・生成中のポーリング・ステップ完了） */
@@ -201,8 +212,11 @@ export function reducer(s: State, action: Action): State {
         authed: true,
         user: action.user,
         courses: action.courses,
+        usage: action.usage,
         selectedCourseId: action.selectedId,
       }
+    case 'usageUpdated':
+      return { ...s, usage: action.usage }
     case 'bootFailed':
       return { ...s, booted: true, authed: false }
     case 'courseUpdated':
