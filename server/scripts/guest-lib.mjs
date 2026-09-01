@@ -11,7 +11,8 @@ import { writeFileSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-export const ITERATIONS = 210_000
+/** Workers の上限に合わせる。src/auth/password.ts と必ず同じ値にする */
+export const ITERATIONS = 100_000
 const KEY_BITS = 256
 /** 紛らわしい文字（0/O、1/l/I）を外す。口頭やメモで伝える場面を想定している */
 const ALPHABET = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'

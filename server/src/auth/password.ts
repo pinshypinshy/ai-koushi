@@ -2,11 +2,18 @@
  * ゲストサインインのパスワード検証（Q-26）。
  *
  * Workers で標準に使える鍵導出のうち、実用に足るのは PBKDF2 のみである
- * （bcrypt / scrypt / argon2 は WebCrypto に無い）。反復回数は OWASP が
- * PBKDF2-SHA256 に対して示す水準に合わせる。
+ * （bcrypt / scrypt / argon2 は WebCrypto に無い）。反復回数の根拠は下記。
  */
 
-const ITERATIONS = 210_000
+/**
+ * Workers は PBKDF2 の反復回数を 100,000 までしか受け付けない。
+ * これを超えると NotSupportedError で落ちる。ローカル（miniflare）は
+ * 制限を課さないため、本番でだけ表面化した（2026-09-01）。
+ * OWASP の水準（210,000）には届かないが、ゲストのパスワードは
+ * 56種類の文字から16文字を無作為に選んでおり、総当たりの成否を決めるのは
+ * 反復回数ではなくこの長さの方であるため、実質的な弱体化にはならない。
+ */
+const ITERATIONS = 100_000
 const KEY_BITS = 256
 
 function toBase64(bytes: Uint8Array): string {

@@ -84,7 +84,7 @@ const GUEST_LOCK_MS = 15 * 60 * 1000
 const DUMMY_RECORD = {
   hash: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
   salt: 'AAAAAAAAAAAAAAAAAAAAAA==',
-  iterations: 210_000,
+  iterations: 100_000,
 }
 
 auth.post('/guest', async (c) => {
