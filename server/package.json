@@ -12,6 +12,9 @@
     "allow:add": "node scripts/allow-add.mjs",
     "allow:list": "node scripts/allow-list.mjs",
     "allow:remove": "node scripts/allow-remove.mjs",
+    "admin:add": "node scripts/admin-add.mjs",
+    "admin:list": "node scripts/admin-list.mjs",
+    "admin:remove": "node scripts/admin-remove.mjs",
     "guest:add": "node scripts/guest-add.mjs",
     "guest:reset": "node scripts/guest-reset.mjs"
   },

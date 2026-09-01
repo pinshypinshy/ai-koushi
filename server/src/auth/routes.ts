@@ -1,10 +1,12 @@
 import { Hono } from 'hono'
+import type { Context } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import { googleAuth } from '@hono/oauth-providers/google'
 import type { AppEnv } from '../env'
 import { clearSession, issueSession } from './session'
 import { isAllowed } from './allowlist'
 import { verifyPassword } from './password'
+import { recordAccess } from '../db/access'
 import {
   findGuestAccount,
   findOrCreateUser,
@@ -13,6 +15,15 @@ import {
 } from '../db/users'
 
 export const auth = new Hono<AppEnv>()
+
+/**
+ * 接続元のIP（§4.7）。Cloudflare が付ける cf-connecting-ip を見る。
+ * X-Forwarded-For は経路上で足せてしまうため使わない。
+ * ローカル（wrangler dev）では付かないので NULL になる。
+ */
+function clientIp(c: Context<AppEnv>): string | null {
+  return c.req.header('cf-connecting-ip') ?? null
+}
 
 /**
  * §4.6 Googleサインイン（OAuth 2.0 / OpenID Connect）。
@@ -56,16 +67,27 @@ auth.get('/callback', async (c) => {
   const profile = c.get('user-google')
 
   // 失敗はログイン画面へ戻して理由をクエリで伝える。理由を出し分けるのは、
-  // 「許可されていない」と「Googleの認証に失敗した」で利用者の取るべき行動が異なるため
-  if (!profile?.email) return c.redirect(`${c.env.APP_ORIGIN}/?auth_error=failed`)
+  // 「許可されていない」と「Googleの認証に失敗した」で利用者の取るべき行動が異なるため。
+  // 併せて §4.7 の記録を残す。許可リストの漏れと総当たりは、成功だけを見ていると分からない
+  const ip = clientIp(c)
+  const log = (identifier: string, result: 'success' | 'denied' | 'failed', userId?: string) =>
+    recordAccess(c.env.DB, { userId: userId ?? null, kind: 'google', identifier, result, ip })
+
+  if (!profile?.email) {
+    await log('(unknown)', 'failed')
+    return c.redirect(`${c.env.APP_ORIGIN}/?auth_error=failed`)
+  }
   if (profile.verified_email === false) {
+    await log(profile.email, 'failed')
     return c.redirect(`${c.env.APP_ORIGIN}/?auth_error=unverified`)
   }
   if (!(await isAllowed(c.env.DB, profile.email))) {
+    await log(profile.email, 'denied')
     return c.redirect(`${c.env.APP_ORIGIN}/?auth_error=not_allowed`)
   }
 
   const user = await findOrCreateUser(c.env.DB, profile.email, profile.name ?? profile.email)
+  await log(profile.email, 'success', user.id)
   await issueSession(c, user)
   return c.redirect(c.env.APP_ORIGIN)
 })
@@ -95,14 +117,22 @@ auth.post('/guest', async (c) => {
     return c.json({ error: 'invalid_request', message: 'IDとパスワードを入力してください' }, 400)
   }
 
+  // §4.7：ゲストは1つのIDを複数人で使い回されると費用が人数分だけ積み上がるため（Q-26）、
+  // 成功も含めて記録する。離れた回線からの同一IDのログインはIPが無いと検知できない
+  const ip = clientIp(c)
+  const log = (result: 'success' | 'failed' | 'locked', userId?: string) =>
+    recordAccess(c.env.DB, { userId: userId ?? null, kind: 'guest', identifier: loginId, result, ip })
+
   const account = await findGuestAccount(c.env.DB, loginId)
   if (!account) {
     await verifyPassword(password, DUMMY_RECORD)
+    await log('failed')
     return c.json({ error: 'unauthorized', message: 'IDまたはパスワードが違います' }, 401)
   }
 
   if (account.lockedUntil && account.lockedUntil > Date.now()) {
     const minutes = Math.ceil((account.lockedUntil - Date.now()) / 60000)
+    await log('locked', account.userId)
     return c.json(
       {
         error: 'locked',
@@ -119,11 +149,13 @@ auth.post('/guest', async (c) => {
   })
   if (!ok) {
     await recordGuestFailure(c.env.DB, loginId, GUEST_MAX_ATTEMPTS, GUEST_LOCK_MS)
+    await log('failed', account.userId)
     // 「ID が無い」と「パスワードが違う」を区別しない。存在の確認に使わせないため
     return c.json({ error: 'unauthorized', message: 'IDまたはパスワードが違います' }, 401)
   }
 
   await recordGuestSuccess(c.env.DB, loginId)
+  await log('success', account.userId)
   await issueSession(c, {
     id: account.userId,
     email: account.email,

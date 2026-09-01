@@ -184,3 +184,172 @@ export interface AttemptRequest {
 export interface RenameCourseRequest {
   title: string
 }
+
+/* ────────────────────────────────────────────────────────────
+   運営管理ページ（§4.7）。段階1では読み取りのみで、更新系は持たない。
+   ここに載るのは運営が見る値であり、利用者本人の画面には現れない。
+   秘密（APIキー・セッション鍵）は含めない（§8.3 SEC-1）。
+   ──────────────────────────────────────────────────────────── */
+
+export type AccountKind = 'google' | 'guest'
+/** ログインの結果。denied は許可リストに無い、failed は認証そのものの失敗 */
+export type AccessResult = 'success' | 'denied' | 'failed' | 'locked'
+/** ai_usage_logs.purpose（§5.1 の5種類の呼び出し） */
+export type AiPurpose = 'outline' | 'quiz' | 'lecture' | 'answer' | 'summary'
+
+/** 概要タブ。件数と金額だけを持つ */
+export interface AdminSummary {
+  users: number
+  guests: number
+  admins: number
+  allowedEmails: number
+  courses: number
+  coursesThisMonth: number
+  costThisMonthUsd: number
+  costTotalUsd: number
+  /** AI 呼び出しのうち error が入っている件数（今月） */
+  aiErrorsThisMonth: number
+  /** success 以外のログイン（今月）。総当たりと許可漏れの両方がここに出る */
+  signInFailuresThisMonth: number
+  /** 集計期間の開始時刻（JST の月初）。§8.2.3 の「今月」と同じ境界 */
+  periodStart: number
+}
+
+/**
+ * 利用者一覧の1行。上限値も同じ行に載せる。
+ * 種別で上限が異なるため（§8.2.3）、クライアント側で種別から引き直すと
+ * limits.ts と二重定義になる。
+ */
+export interface AdminUserRow {
+  id: string
+  email: string
+  displayName: string
+  kind: AccountKind
+  isAdmin: boolean
+  createdAt: number
+  lastLoginAt: number | null
+  courses: number
+  coursesThisMonth: number
+  courseLimit: number
+  costThisMonthUsd: number
+  costLimitUsd: number
+  costTotalUsd: number
+}
+
+/** 利用者詳細に並べる講義。本人の画面（CourseSummary）とは別物で、運営が見る値を足す */
+export interface AdminCourseRow {
+  id: string
+  title: string
+  status: CourseStatus
+  quizStatus: QuizStatus
+  errorMessage: string | null
+  totalSteps: number
+  completedSteps: number
+  questions: number
+  materialChars: number
+  costUsd: number
+  createdAt: number
+  updatedAt: number
+}
+
+/** AI 呼び出し1件（ai_usage_logs の1行）。§8.4 のログ要件がそのまま画面に出る */
+export interface AdminUsageRow {
+  id: string
+  userId: string
+  userEmail: string | null
+  courseId: string | null
+  courseTitle: string | null
+  purpose: AiPurpose
+  model: string
+  inputTokens: number
+  cachedInputTokens: number
+  outputTokens: number
+  thinkingTokens: number
+  estimatedCostUsd: number
+  durationMs: number
+  error: string | null
+  createdAt: number
+}
+
+/** ログイン1件（access_logs の1行） */
+export interface AdminAccessRow {
+  id: string
+  userId: string | null
+  userEmail: string | null
+  kind: AccountKind
+  identifier: string
+  result: AccessResult
+  ip: string | null
+  createdAt: number
+}
+
+export interface AdminUserDetail {
+  user: AdminUserRow
+  courses: AdminCourseRow[]
+  usage: AdminUsageRow[]
+  access: AdminAccessRow[]
+}
+
+/** 許可リストの1行。サインイン済みかどうかを併記する（追加しただけで未使用が分かる） */
+export interface AdminAllowedEmailRow {
+  email: string
+  note: string | null
+  createdAt: number
+  userId: string | null
+  lastLoginAt: number | null
+}
+
+/** ゲストの1行。パスワードに関わる値（導出鍵・ソルト）は返さない */
+export interface AdminGuestRow {
+  loginId: string
+  userId: string
+  displayName: string
+  failedCount: number
+  /**
+   * 現在ロック中かどうか。lockedUntil と現在時刻の比較をサーバー側で済ませる。
+   * 画面で判定すると描画のたびに現在時刻を読むことになり、同じ値を映しているのに
+   * 表示が変わりうる（React の描画は純粋であることを前提に置いている）。
+   */
+  locked: boolean
+  lockedUntil: number | null
+  createdAt: number
+  lastLoginAt: number | null
+  courses: number
+}
+
+/**
+ * システムプロンプト1件。コードの中身ではなく、実際に送っている文字列を返す。
+ * 引数で変わる箇所（講義タイトルの指定、骨子の埋め込み）は note で断る。
+ */
+export interface AdminPrompt {
+  key: string
+  label: string
+  note: string | null
+  body: string
+}
+
+/** 設定タブ。段階1では表示のみで、変更はコードと wrangler.jsonc で行う */
+export interface AdminConfig {
+  models: { purpose: AiPurpose; model: string }[]
+  limits: { kind: AccountKind; courses: number; costUsd: number }[]
+  prompts: AdminPrompt[]
+}
+
+export interface AdminUsersResponse {
+  users: AdminUserRow[]
+}
+/** 一覧は上限件数で切る。切られたかどうかを hasMore で示す（黙って落とさない） */
+export interface AdminUsageResponse {
+  rows: AdminUsageRow[]
+  hasMore: boolean
+}
+export interface AdminAccessResponse {
+  rows: AdminAccessRow[]
+  hasMore: boolean
+}
+export interface AdminAllowlistResponse {
+  rows: AdminAllowedEmailRow[]
+}
+export interface AdminGuestsResponse {
+  rows: AdminGuestRow[]
+}

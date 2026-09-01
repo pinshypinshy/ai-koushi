@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Suspense, lazy, useState } from 'react'
 import { useCurrentCourse, useStore } from './store'
 import { ApiFailure, api, courseFromDetail } from './api'
 import { isDemo } from './demo'
@@ -369,7 +369,27 @@ function DemoBanner() {
   )
 }
 
+/**
+ * 運営管理ページ（§4.7）。lazy で分けるのは、運営用の画面のコードを
+ * 通常の利用者へ配信しないため。認可はサーバーの requireAdmin が担う。
+ */
+const AdminApp = lazy(() => import('./screens/admin/AdminApp'))
+
+/** 末尾のスラッシュ有無で入れなくなると原因が分かりにくいため、両方を受ける */
+function isAdminPath(): boolean {
+  return window.location.pathname.replace(/\/$/, '') === '/admin'
+}
+
 export default function App() {
+  // 管理ページは講義の状態を持たない。StoreProvider（起動時の bootstrap）も通さない
+  if (isAdminPath()) {
+    return (
+      <Suspense fallback={<div className="h-full bg-slate-100" />}>
+        <AdminApp />
+      </Suspense>
+    )
+  }
+
   return (
     <StoreProvider>
       <div className="flex h-full flex-col">

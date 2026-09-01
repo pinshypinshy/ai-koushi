@@ -7,6 +7,7 @@ import { courses } from './routes/courses'
 import { lecture } from './routes/lecture'
 import { quiz } from './routes/quiz'
 import { usage } from './routes/usage'
+import { admin } from './routes/admin'
 import { dev } from './routes/dev'
 
 const app = new Hono<AppEnv>()
@@ -23,6 +24,12 @@ app.route('/api', courses)
 app.route('/api', lecture)
 app.route('/api', quiz)
 app.route('/api', usage)
+
+/**
+ * 運営管理ページ（§4.7）。ルート側で requireAdmin を1本ずつ当てている。
+ * プレフィックスを分けているのは、管理用の口がどこから始まるかを1行で見えるようにするため。
+ */
+app.route('/api/admin', admin)
 
 /**
  * 開発用。製品には含めない（§3「画面一覧」の DevPanel と同じ位置づけ）。

@@ -1,4 +1,12 @@
 import type {
+  AdminAccessResponse,
+  AdminAllowlistResponse,
+  AdminConfig,
+  AdminGuestsResponse,
+  AdminSummary,
+  AdminUserDetail,
+  AdminUsageResponse,
+  AdminUsersResponse,
   ApiError,
   ApiMessage,
   AttemptResult,
@@ -238,4 +246,35 @@ export function courseFromSummary(summary: CourseSummary): Course {
     sourceMarkdown: '',
     detailLoaded: false,
   }
+}
+
+/**
+ * 運営管理ページ（§4.7）。段階1は読み取りのみ。
+ *
+ * サンプル表示（isDemo）の分岐は通さない。サンプルはログイン前に中身を見せるための
+ * ものであり、管理ページには対応する偽データを置く意味が無いため。
+ * 認可はサーバー側の requireAdmin が担う。ここで隠しても防御にはならない。
+ */
+export const adminApi = {
+  summary: () => request<AdminSummary>('/api/admin/summary'),
+  users: () => request<AdminUsersResponse>('/api/admin/users'),
+  user: (id: string) => request<AdminUserDetail>(`/api/admin/users/${encodeURIComponent(id)}`),
+  usage: (params: { purpose?: string; errorsOnly?: boolean; limit?: number }) =>
+    request<AdminUsageResponse>(`/api/admin/usage${adminQuery(params)}`),
+  access: (params: { result?: string; failuresOnly?: boolean; limit?: number }) =>
+    request<AdminAccessResponse>(`/api/admin/access${adminQuery(params)}`),
+  allowlist: () => request<AdminAllowlistResponse>('/api/admin/allowlist'),
+  guests: () => request<AdminGuestsResponse>('/api/admin/guests'),
+  config: () => request<AdminConfig>('/api/admin/config'),
+}
+
+/** 未指定の絞り込みはクエリに載せない。サーバー側の既定と食い違わないようにする */
+function adminQuery(params: Record<string, string | number | boolean | undefined>): string {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === false || value === '') continue
+    query.set(key, value === true ? '1' : String(value))
+  }
+  const text = query.toString()
+  return text ? `?${text}` : ''
 }
