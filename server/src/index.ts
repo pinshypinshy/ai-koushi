@@ -35,3 +35,9 @@ app.onError((err, c) => {
 })
 
 export default app
+
+/**
+ * Workflow のクラスは Worker のエクスポートとして公開する必要がある（Cloudflare の仕様）。
+ * wrangler.jsonc の workflows[].class_name がこの名前を参照する。
+ */
+export { CreateCourseWorkflow } from './workflows/createCourse'

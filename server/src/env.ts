@@ -1,8 +1,11 @@
 import type { SessionUser } from './auth/session'
+import type { CreateCourseParams } from './workflows/createCourse'
 
 /** wrangler.jsonc の vars / d1_databases と .dev.vars（本番は wrangler secret）に対応する */
 export interface Env {
   DB: D1Database
+  /** §7.4 講義作成ジョブ。wrangler.jsonc の workflows と対応する */
+  COURSE_WORKFLOW: Workflow<CreateCourseParams>
 
   // vars（秘密でない設定値）
   APP_ORIGIN: string

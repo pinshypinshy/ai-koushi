@@ -9,6 +9,15 @@
   // §8.4 ログ要件。Workers Observability を有効にする
   "observability": { "enabled": true },
 
+  // §7.4 講義作成ジョブ。①骨子生成 → ②確認テスト生成をステップ単位で永続化する
+  "workflows": [
+    {
+      "name": "ai-koushi-create-course",
+      "binding": "COURSE_WORKFLOW",
+      "class_name": "CreateCourseWorkflow"
+    }
+  ],
+
   "d1_databases": [
     {
       "binding": "DB",

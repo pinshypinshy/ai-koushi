@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { GoogleGenAI, Type } from '@google/genai'
 import type { AppEnv, Env } from '../env'
 import { requireUser } from '../auth/session'
+import { MATERIAL_MAX_CHARS, MATERIAL_MIN_CHARS } from './courses'
 import { collectUsage, createAiClient, flushUsage } from '../ai/factory'
 import { estimateCostUsd } from '../ai/usage'
 import { D1CacheStore } from '../db/caches'
@@ -182,12 +183,8 @@ dev.get('/ai/probe', requireUser, async (c) => {
 // ①骨子生成 → ②確認テスト生成の実通信確認
 // ---------------------------------------------------------------------------
 
-/**
- * §4.1.2 の入力制約。検証用でも上限を外さない。
- * 誤って巨大な教材を投げたときに発生する課金は本番とまったく同じであるため。
- */
-const MATERIAL_MIN_CHARS = 500
-const MATERIAL_MAX_CHARS = 80_000
+// §4.1.2 の入力制約は本番の受け口（courses.ts）と同じ値を使う。検証用でも上限を外さない。
+// 誤って巨大な教材を投げたときに発生する課金は本番とまったく同じであるため
 
 /** §8.4 のログ要件と揃える。長大なスタックはそのまま載せない */
 function messageOf(err: unknown): string {

@@ -7,6 +7,11 @@
  */
 
 export type CourseStatus = 'generating' | 'ready' | 'failed'
+/**
+ * 確認テストの状態（§4.1.6）。CourseStatus とは独立に動く。
+ * pending は「まだ無い」で、初回生成中と再生成中の両方を含む。
+ */
+export type QuizStatus = 'pending' | 'ready' | 'failed'
 export type GeneratingPhase = 'outline' | 'quiz'
 export type StepStatus = 'not_started' | 'in_progress' | 'completed'
 export type MessageRole = 'user' | 'assistant'
@@ -22,6 +27,8 @@ export interface CourseSummary {
   id: string
   title: string
   status: CourseStatus
+  /** 講義は利用可能でテストだけ失敗している状態を表せるようにする（§4.1.6） */
+  quizStatus: QuizStatus
   phase: GeneratingPhase | null
   errorMessage: string | null
   totalSteps: number
@@ -100,4 +107,18 @@ export interface BootstrapResponse {
 export interface ApiError {
   error: string
   message: string
+}
+
+/** 講義作成（§4.1.4）。title が null のとき、AI が教材から命名する（§5.2） */
+export interface CreateCourseRequest {
+  title: string | null
+  material: string
+}
+
+/**
+ * 作成の受付。生成の完了は待たず、講義IDだけを即座に返す（§4.1.4）。
+ * 以降の進捗は GET /api/courses/:id の status / phase / quizStatus で見る（§7.4）。
+ */
+export interface CreateCourseResponse {
+  courseId: string
 }
