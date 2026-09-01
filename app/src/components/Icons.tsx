@@ -12,8 +12,10 @@ export const IconDoc = ({ className = base }: P) => (
   </svg>
 )
 export const IconChat = ({ className = base }: P) => (
+  // 角丸四角の吹き出し。円形の吹き出しは、指定した半径では結べない2点を円弧で
+  // 繋ごうとして描画側に半径を拡大され、形が崩れていた
   <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-4.5A8 8 0 0 1 13 4a8 8 0 0 1 8 8Z" />
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z" />
   </svg>
 )
 export const IconCheckSquare = ({ className = base }: P) => (
