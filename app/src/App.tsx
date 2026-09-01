@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useCurrentCourse, useStore } from './store'
 import { ApiFailure, api, courseFromDetail } from './api'
+import { isDemo } from './demo'
 import { StoreProvider } from './StoreProvider'
 import { useIsMobile } from './hooks/useMediaQuery'
 import { useKeyboardOpen } from './hooks/useKeyboardOpen'
@@ -350,10 +351,33 @@ function Shell() {
   )
 }
 
+/** サンプル表示中の帯。本物と取り違えないようにするため常に見える位置に置く */
+function DemoBanner() {
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 bg-amber-100 px-4 py-2 text-xs text-amber-900">
+      <span className="font-medium">これはサンプルです。</span>
+      <span>AIは応答せず、あらかじめ用意した講義を表示しています。</span>
+      <button
+        onClick={() => {
+          window.location.href = '/'
+        }}
+        className="ml-auto shrink-0 rounded-lg bg-amber-900 px-3 py-1 font-medium text-amber-50 transition hover:bg-amber-800"
+      >
+        ログイン画面へ戻る
+      </button>
+    </div>
+  )
+}
+
 export default function App() {
   return (
     <StoreProvider>
-      <Shell />
+      <div className="flex h-full flex-col">
+        {isDemo() && <DemoBanner />}
+        <div className="min-h-0 flex-1">
+          <Shell />
+        </div>
+      </div>
     </StoreProvider>
   )
 }

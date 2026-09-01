@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useLectureTurn } from '../hooks/useLectureTurn'
+import { isDemo } from '../demo'
 import type { Course } from '../types'
 import { IconSend } from './Icons'
 
@@ -7,7 +8,9 @@ import { IconSend } from './Icons'
 export function PromptInput({ course }: { course: Course }) {
   const { running, send } = useLectureTurn(course)
   const [text, setText] = useState('')
-  const disabled = course.currentStepId === null || running
+  // サンプルでは AI を呼ばないため、質問は受け付けない
+  const demo = isDemo()
+  const disabled = course.currentStepId === null || running || demo
 
   const submit = () => {
     const t = text.trim()
@@ -31,11 +34,13 @@ export function PromptInput({ course }: { course: Course }) {
           rows={1}
           disabled={disabled}
           placeholder={
-            course.currentStepId === null
-              ? '講義が完了しました'
-              : running
-                ? 'AIが応答しています…'
-                : 'プロンプトを入力'
+            demo
+              ? 'サンプルでは質問できません'
+              : course.currentStepId === null
+                ? '講義が完了しました'
+                : running
+                  ? 'AIが応答しています…'
+                  : 'プロンプトを入力'
           }
           className="max-h-32 min-h-[24px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
         />

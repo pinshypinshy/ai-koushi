@@ -1,9 +1,12 @@
 import { useStore } from '../store'
+import { isDemo } from '../demo'
 import { IconDots, IconPlus, IconUser, IconX } from './Icons'
 
 /** A-1〜A-4（§3.4）。モバイルではドロワーとして表示する。 */
 export function Sidebar({ onClose }: { onClose?: () => void }) {
   const { state, dispatch } = useStore()
+  // サンプルでは講義の作成・改名・削除を行わせない（保存先が無いため）
+  const demo = isDemo()
   const courses = [...state.courses].sort((a, b) => b.updatedAt - a.updatedAt)
 
   /**
@@ -34,11 +37,13 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
 
       <div className="px-3">
         <button
+          disabled={demo}
+          title={demo ? 'サンプルでは講義を作成できません' : undefined}
           onClick={() => {
             dispatch({ type: 'openCreate' })
             onClose?.()
           }}
-          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-800"
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-500 disabled:hover:bg-transparent"
         >
           <IconPlus className="h-4 w-4" />
           新規講義
@@ -74,6 +79,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
                       </span>
                     )}
                   </button>
+                  {!demo && (
                   <button
                     aria-label={`${c.title} のメニュー`}
                     onClick={(e) => {
@@ -84,6 +90,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
                   >
                     <IconDots className="h-4 w-4" />
                   </button>
+                  )}
                 </li>
               )
             })}
