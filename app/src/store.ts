@@ -2,6 +2,7 @@ import { createContext, useContext, type Dispatch } from 'react'
 import type { Attempt, Course, Question, Tab, User } from './types'
 import { SAMPLE_MARKDOWN, createInitialCourses } from './mock/data'
 
+/** 開発パネル（画面一覧）が投入するモック用の利用者。実データではサーバーの値を使う */
 export const MOCK_USER: User = { name: '平石悠生', email: 'hrisyklit@gmail.com' }
 
 /** 教材の文字数制約（§4.1.2） */
@@ -28,11 +29,15 @@ export type ModalState =
 
 export type MenuState =
   | null
-  | { type: 'course'; courseId: string }
+  /** renaming は SC-13 の「名前を変更」を選んだ後の状態（その場で編集可能にする） */
+  | { type: 'course'; courseId: string; renaming?: boolean }
   | { type: 'user' }
 
 export interface State {
   authed: boolean
+  /** 起動時の問い合わせが終わったか。終わるまではログイン画面も本体も出さない */
+  booted: boolean
+  user: User | null
   courses: Course[]
   selectedCourseId: string | null
   tab: Tab
@@ -49,6 +54,8 @@ export interface State {
   draftMarkdown: string
   /** 直前に追加された assistant メッセージ（ストリーミング演出の対象） */
   streamingMessageId: string | null
+  /** 講義作成の要求がサーバーに拒否されたときの文言（文字数・月間上限など） */
+  createError: string | null
 }
 
 const emptyQuiz: QuizState = {
@@ -62,11 +69,13 @@ const emptyQuiz: QuizState = {
 }
 
 export function initialState(): State {
-  const courses = createInitialCourses()
   return {
     authed: false,
-    courses,
-    selectedCourseId: courses[0]?.id ?? null,
+    booted: false,
+    user: null,
+    // 実データはサーバーから読む。モックは開発パネルから明示的に投入する
+    courses: [],
+    selectedCourseId: null,
     tab: 'lecture',
     quiz: emptyQuiz,
     attempts: [],
@@ -78,12 +87,22 @@ export function initialState(): State {
     draftTitle: '',
     draftMarkdown: '',
     streamingMessageId: null,
+    createError: null,
   }
 }
 
 export type Action =
   | { type: 'login' }
   | { type: 'logout' }
+  /** 起動時の /api/bootstrap の結果 */
+  | { type: 'bootstrapped'; user: User; courses: Course[]; selectedId: string | null }
+  /** 未ログイン、または起動時の問い合わせに失敗した */
+  | { type: 'bootFailed' }
+  /** サーバーから取り直した講義で置き換える（選択時・生成中のポーリング） */
+  | { type: 'courseUpdated'; course: Course }
+  | { type: 'courseCreated'; course: Course }
+  | { type: 'materialLoaded'; courseId: string; markdown: string }
+  | { type: 'setCreateError'; message: string | null }
   | { type: 'selectCourse'; id: string }
   | { type: 'setTab'; tab: Tab }
   | { type: 'setDraft'; title?: string; markdown?: string }
@@ -93,7 +112,6 @@ export type Action =
   | { type: 'toggleProgress' }
   | { type: 'openCreate' }
   | { type: 'closeCreate' }
-  | { type: 'createCourse' }
   | { type: 'generationPhase'; courseId: string; phase: 'outline' | 'quiz' }
   | { type: 'generationDone'; courseId: string }
   | { type: 'generationFail'; courseId: string; message: string }
@@ -149,6 +167,28 @@ function updateCourse(s: State, id: string, fn: (c: Course) => Course): Course[]
   return s.courses.map((c) => (c.id === id ? fn(c) : c))
 }
 
+/**
+ * サーバーから取り直した講義を、手元の講義へ重ねる。
+ *
+ * 一覧（/api/bootstrap）は軽量で、ステップも対話も持たない（§6.4）。
+ * 単純に置き換えると、選択中の講義の中身が一覧の更新で消えてしまうため、
+ * 「取得できたものだけを上書きする」形にする。
+ */
+function mergeCourse(prev: Course, next: Course): Course {
+  return {
+    ...prev,
+    ...next,
+    steps: next.detailLoaded ? next.steps : prev.steps,
+    messages: next.detailLoaded ? next.messages : prev.messages,
+    detailLoaded: prev.detailLoaded || next.detailLoaded,
+    // 教材原文は別のエンドポイントで取得する。講義の更新では触らない（§4.4）
+    sourceMarkdown: prev.materialLoaded ? prev.sourceMarkdown : next.sourceMarkdown,
+    materialLoaded: prev.materialLoaded,
+    // 確認テストは段階3で接続する。それまでモックの設問を保持する
+    questions: prev.questions,
+  }
+}
+
 export function latestAttempt(attempts: Attempt[], questionId: string): Attempt | null {
   let found: Attempt | null = null
   for (const a of attempts) {
@@ -175,7 +215,7 @@ export function reducer(s: State, action: Action): State {
     case 'login':
       return { ...s, authed: true }
     case 'logout':
-      return { ...initialState(), authed: false }
+      return { ...initialState(), booted: true, authed: false }
     case 'selectCourse':
       return {
         ...s,
@@ -207,33 +247,46 @@ export function reducer(s: State, action: Action): State {
     case 'closeCreate':
       return { ...s, createOpen: false }
 
-    case 'createCourse': {
-      const id = nid('course')
-      const base = createInitialCourses()[0]
-      const course: Course = {
-        ...base,
-        id,
-        title: s.draftTitle.trim() || '無題の講義',
-        status: 'generating',
-        phase: 'outline',
-        sourceMarkdown: s.draftMarkdown,
-        messages: [],
-        currentStepId: null,
-        scriptCursor: 0,
-        steps: base.steps.map((x) => ({ ...x, status: 'not_started' })),
-        updatedAt: Date.now(),
-      }
+    case 'bootstrapped':
       return {
         ...s,
-        courses: [course, ...s.courses],
-        selectedCourseId: id,
+        booted: true,
+        authed: true,
+        user: action.user,
+        courses: action.courses,
+        selectedCourseId: action.selectedId,
+      }
+    case 'bootFailed':
+      return { ...s, booted: true, authed: false }
+    case 'courseUpdated':
+      return {
+        ...s,
+        courses: s.courses.map((c) => (c.id === action.course.id ? mergeCourse(c, action.course) : c)),
+      }
+    case 'courseCreated':
+      return {
+        ...s,
+        courses: [action.course, ...s.courses],
+        selectedCourseId: action.course.id,
         tab: 'lecture',
         createOpen: false,
         modal: null,
         draftTitle: '',
         draftMarkdown: '',
+        createError: null,
       }
-    }
+    case 'materialLoaded':
+      return {
+        ...s,
+        courses: updateCourse(s, action.courseId, (c) => ({
+          ...c,
+          sourceMarkdown: action.markdown,
+          materialLoaded: true,
+        })),
+      }
+    case 'setCreateError':
+      return { ...s, createError: action.message }
+
     case 'generationPhase':
       return { ...s, courses: updateCourse(s, action.courseId, (c) => ({ ...c, phase: action.phase })) }
     case 'generationDone':
@@ -253,7 +306,13 @@ export function reducer(s: State, action: Action): State {
             currentStepId: first.id,
             scriptCursor: 1,
             messages: [
-              { id: nid('m'), stepId: first.id, role: 'assistant', content: first.script[0] },
+              {
+                id: nid('m'),
+                stepId: first.id,
+                role: 'assistant' as const,
+                content: first.script?.[0] ?? '',
+                createdAt: Date.now(),
+              },
             ],
           }
         }),
@@ -305,12 +364,20 @@ export function reducer(s: State, action: Action): State {
         stepId: step.id,
         role: 'user' as const,
         content: action.text,
+        createdAt: Date.now(),
       }
-      const hasNext = c.scriptCursor < step.script.length
+      const script = step.script ?? []
+      const hasNext = c.scriptCursor < script.length
       const content = hasNext
-        ? step.script[c.scriptCursor]
+        ? script[c.scriptCursor]
         : FALLBACK_ANSWERS[fallbackCursor++ % FALLBACK_ANSWERS.length]
-      const aiMsg = { id: nid('m'), stepId: step.id, role: 'assistant' as const, content }
+      const aiMsg = {
+        id: nid('m'),
+        stepId: step.id,
+        role: 'assistant' as const,
+        content,
+        createdAt: Date.now(),
+      }
       return {
         ...s,
         streamingMessageId: aiMsg.id,
@@ -340,7 +407,13 @@ export function reducer(s: State, action: Action): State {
           courses: updateCourse(s, c.id, (x) => ({ ...x, steps, currentStepId: null })),
         }
       }
-      const aiMsg = { id: nid('m'), stepId: next.id, role: 'assistant' as const, content: next.script[0] }
+      const aiMsg = {
+        id: nid('m'),
+        stepId: next.id,
+        role: 'assistant' as const,
+        content: next.script?.[0] ?? '',
+        createdAt: Date.now(),
+      }
       return {
         ...s,
         streamingMessageId: aiMsg.id,
@@ -437,14 +510,27 @@ export function reducer(s: State, action: Action): State {
   }
 }
 
+/** 開発パネル専用。モック講義を積んだ状態を作る（実データとは別系統） */
+function mockState(): State {
+  const courses = createInitialCourses()
+  return {
+    ...initialState(),
+    authed: true,
+    booted: true,
+    user: MOCK_USER,
+    courses,
+    selectedCourseId: courses[0]?.id ?? null,
+  }
+}
+
 function applyScenario(s: State, name: DevScenario): State {
-  const fresh = { ...initialState(), authed: true }
+  const fresh = mockState()
   const gitId = 'c-git'
   switch (name) {
     case 'reset':
       return fresh
     case 'login':
-      return { ...initialState(), authed: false }
+      return { ...initialState(), booted: true, authed: false }
     case 'empty':
       return { ...fresh, courses: [], selectedCourseId: null }
     case 'generating':
@@ -524,12 +610,13 @@ function applyScenario(s: State, name: DevScenario): State {
           const step = c.steps.find((x) => x.id === c.currentStepId)!
           return {
             ...c,
-            scriptCursor: step.script.length,
-            messages: step.script.map((content, i) => ({
+            scriptCursor: (step.script ?? []).length,
+            messages: (step.script ?? []).map((content) => ({
               id: nid('m'),
               stepId: step.id,
               role: 'assistant' as const,
-              content: i === 0 ? content : content,
+              content,
+              createdAt: Date.now(),
             })),
           }
         }),

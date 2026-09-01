@@ -1,9 +1,8 @@
-import { useStore } from '../store'
+import { LOGIN_URL } from '../api'
 import { IconGoogle } from '../components/Icons'
 
 /** SC-01 ログイン画面（§3.2）。未認証時はこの画面のみを表示する（§4.5）。 */
 export function Login() {
-  const { dispatch } = useStore()
   return (
     <div className="flex h-full flex-col items-center justify-center bg-slate-100 px-6">
       <div className="w-full max-w-sm text-center">
@@ -14,7 +13,10 @@ export function Login() {
           AIが講義と確認テストを作ります
         </p>
         <button
-          onClick={() => dispatch({ type: 'login' })}
+          // 認可コードフローの往路。サーバー側で Google へ転送される（§4.6）
+          onClick={() => {
+            window.location.href = LOGIN_URL
+          }}
           className="mt-10 flex w-full items-center justify-center gap-3 rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
         >
           <IconGoogle />

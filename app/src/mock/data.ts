@@ -67,7 +67,9 @@ function step(
     title,
     objective,
     keyPoints,
+    sourceRef: null,
     status: 'not_started',
+    completedAt: null,
     script,
   }
 }
@@ -378,15 +380,28 @@ function course(
     id,
     title,
     status: 'ready',
+    quizStatus: 'ready',
     sourceMarkdown: SAMPLE_MARKDOWN,
+    materialLoaded: true,
     steps: s,
     questions,
     messages: current
-      ? [{ id: uid('m'), stepId: current.id, role: 'assistant', content: current.script[0] }]
+      ? [
+          {
+            id: uid('m'),
+            stepId: current.id,
+            role: 'assistant',
+            content: current.script?.[0] ?? '',
+            createdAt: updatedAt,
+          },
+        ]
       : [],
     currentStepId: current?.id ?? null,
     scriptCursor: 1,
     updatedAt,
+    // サーバーへ問い合わせない（開発パネル専用のデータであるため）
+    isMock: true,
+    detailLoaded: true,
   }
 }
 

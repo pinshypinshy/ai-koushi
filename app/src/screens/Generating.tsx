@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useStore } from '../store'
+import { api, courseFromDetail } from '../api'
 import type { Course } from '../types'
 
 const PHASES = [
@@ -7,25 +8,43 @@ const PHASES = [
   { key: 'quiz', label: '確認テストを作成しています' },
 ] as const
 
-/**
- * SC-05 生成中。
- * 実装時は courses.status をポーリングして判定する（§7.4）。ここではタイマーで模擬する。
- */
+/** SC-05 生成中。§7.4「フロントエンドは2秒間隔でポーリングする」 */
 export function Generating({ course }: { course: Course }) {
   const { dispatch } = useStore()
   const activeIndex = course.phase === 'quiz' ? 1 : 0
 
+  const isMock = course.isMock === true
+
   useEffect(() => {
-    const t1 = setTimeout(
-      () => dispatch({ type: 'generationPhase', courseId: course.id, phase: 'quiz' }),
-      2200,
-    )
-    const t2 = setTimeout(() => dispatch({ type: 'generationDone', courseId: course.id }), 4600)
-    return () => {
-      clearTimeout(t1)
-      clearTimeout(t2)
+    // 開発パネルのモック講義はサーバーに存在しないため、従来どおりタイマーで模擬する
+    if (isMock) {
+      const t1 = setTimeout(
+        () => dispatch({ type: 'generationPhase', courseId: course.id, phase: 'quiz' }),
+        2200,
+      )
+      const t2 = setTimeout(() => dispatch({ type: 'generationDone', courseId: course.id }), 4600)
+      return () => {
+        clearTimeout(t1)
+        clearTimeout(t2)
+      }
     }
-  }, [course.id, dispatch])
+
+    let alive = true
+    const timer = setInterval(() => {
+      api
+        .course(course.id)
+        .then((detail) => {
+          if (alive) dispatch({ type: 'courseUpdated', course: courseFromDetail(detail) })
+        })
+        .catch(() => {
+          // 一時的な失敗は次の周期で拾い直す。生成はサーバー側で続いている（§4.1.6 途中離脱）
+        })
+    }, 2000)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [course.id, isMock, dispatch])
 
   return (
     <div className="flex h-full flex-col items-center justify-center px-6 text-center">

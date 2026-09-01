@@ -1,4 +1,4 @@
-import { MOCK_USER, useStore } from '../store'
+import { useStore } from '../store'
 import { IconDots, IconPlus, IconUser, IconX } from './Icons'
 
 /** A-1〜A-4（§3.4）。モバイルではドロワーとして表示する。 */
@@ -6,11 +6,19 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   const { state, dispatch } = useStore()
   const courses = [...state.courses].sort((a, b) => b.updatedAt - a.updatedAt)
 
+  /**
+   * 進捗の表示。ステップを取得済みならそちらを数え、一覧しか無い講義では
+   * サーバーが返した件数を使う（§6.4：一覧はステップを含めない）。
+   */
   const progress = (courseId: string) => {
     const c = state.courses.find((x) => x.id === courseId)
-    if (!c || c.steps.length === 0) return null
-    const done = c.steps.filter((s) => s.status === 'completed').length
-    return `${done} / ${c.steps.length}`
+    if (!c) return null
+    const total = c.steps.length || c.totalSteps || 0
+    if (total === 0) return null
+    const done = c.steps.length
+      ? c.steps.filter((s) => s.status === 'completed').length
+      : (c.completedSteps ?? 0)
+    return `${done} / ${total}`
   }
 
   return (
@@ -89,7 +97,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
           className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm text-slate-300 transition hover:bg-slate-800"
         >
           <IconUser className="h-5 w-5 shrink-0" />
-          <span className="truncate">{MOCK_USER.name}</span>
+          <span className="truncate">{state.user?.name ?? ''}</span>
         </button>
       </div>
     </div>

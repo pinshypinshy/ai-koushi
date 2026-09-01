@@ -1,3 +1,6 @@
+import { useEffect } from 'react'
+import { useStore } from '../store'
+import { api } from '../api'
 import type { Course } from '../types'
 import { Markdown } from '../components/Markdown'
 
@@ -6,7 +9,26 @@ import { Markdown } from '../components/Markdown'
  * 編集・差し替えは行わない（§4.1.7）。生成中・失敗中でも教材自体は保存済みのため表示する。
  */
 export function MaterialTab({ course }: { course: Course }) {
+  const { dispatch } = useStore()
   const count = course.sourceMarkdown.length
+  // 原文は最大240KBになるため、講義本体とは別に取得する（§4.4）
+  const loaded = course.materialLoaded === true
+
+  useEffect(() => {
+    if (loaded || course.isMock) return
+    let alive = true
+    api
+      .material(course.id)
+      .then((m) => {
+        if (alive) dispatch({ type: 'materialLoaded', courseId: course.id, markdown: m.rawMarkdown })
+      })
+      .catch(() => {
+        // 取得できなければ下の「教材が登録されていません」を出すほかない
+      })
+    return () => {
+      alive = false
+    }
+  }, [course.id, course.isMock, loaded, dispatch])
 
   return (
     <div className="mx-auto flex h-full w-full max-w-4xl flex-col gap-3 px-4 pb-4">
@@ -23,8 +45,10 @@ export function MaterialTab({ course }: { course: Course }) {
       <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-slate-200 bg-white p-5">
         {course.sourceMarkdown.trim() ? (
           <Markdown>{course.sourceMarkdown}</Markdown>
-        ) : (
+        ) : loaded || course.isMock ? (
           <p className="text-sm text-slate-400">教材が登録されていません</p>
+        ) : (
+          <p className="text-sm text-slate-400">教材を読み込んでいます…</p>
         )}
       </div>
     </div>

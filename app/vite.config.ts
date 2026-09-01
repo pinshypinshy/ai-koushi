@@ -6,6 +6,8 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
+    // shared/api.ts は app/ の外にあるため、既定の許可範囲（app/）だと読み込めない
+    fs: { allow: ['..'] },
     // サーバー（server/、wrangler dev）へ転送する。
     // フロントと同一オリジンに揃えることで、セッション Cookie と OAuth の
     // リダイレクト先が単一のオリジンに収まる。

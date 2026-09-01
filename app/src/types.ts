@@ -1,33 +1,30 @@
 /**
  * 型定義。REQUIREMENTS.md §6「データモデル」に対応する。
- * UI 実装のためサーバー側の表現をそのまま持たず、画面が必要とする形に寄せている。
+ *
+ * 講義・ステップ・対話はサーバーと共有する shared/api.ts の型に寄せている。
+ * 一方、講義タブと確認テストタブはまだモックで動いているため、台本（script）や
+ * 設問（Question）といったモック専用の項目が画面側にだけ残っている。
+ * これらは段階3（受講と確認テストの接続）で取り除く。
  */
 
-export type CourseStatus = 'generating' | 'ready' | 'failed'
-export type GeneratingPhase = 'outline' | 'quiz'
-export type StepStatus = 'not_started' | 'in_progress' | 'completed'
+import type {
+  ApiMessage,
+  ApiStep,
+  CourseStatus,
+  GeneratingPhase,
+  QuizStatus,
+  StepStatus,
+} from '../../shared/api'
+
+export type { CourseStatus, GeneratingPhase, QuizStatus, StepStatus }
 export type Tab = 'material' | 'lecture' | 'quiz'
 
-export interface Step {
-  id: string
-  orderIndex: number
-  title: string
-  objective: string
-  keyPoints: string[]
-  status: StepStatus
-  /**
-   * 講義本文のモック。1要素が AI の1発話にあたる（§5.4 R-1）。
-   * 実装時はここが streamLecture の逐次生成に置き換わる（§5.8）。
-   */
-  script: string[]
+export interface Step extends ApiStep {
+  /** 講義本文のモック。1要素が AI の1発話にあたる（§5.4 R-1）。実データでは持たない */
+  script?: string[]
 }
 
-export interface Message {
-  id: string
-  stepId: string
-  role: 'user' | 'assistant'
-  content: string
-}
+export type Message = ApiMessage
 
 export interface Choice {
   id: string
@@ -48,16 +45,27 @@ export interface Course {
   id: string
   title: string
   status: CourseStatus
-  phase?: GeneratingPhase
-  errorMessage?: string
+  quizStatus: QuizStatus
+  phase?: GeneratingPhase | null
+  errorMessage?: string | null
+  /** 教材タブで表示する原文。取得するまでは空（§4.4） */
   sourceMarkdown: string
+  /** 教材原文を取得済みか。空の教材と未取得を区別する */
+  materialLoaded?: boolean
   steps: Step[]
   questions: Question[]
   messages: Message[]
   currentStepId: string | null
-  /** 現在のステップで何発話目まで提示したか */
+  /** 現在のステップで何発話目まで提示したか（モック専用） */
   scriptCursor: number
   updatedAt: number
+  /** 一覧だけを持つ状態でも進捗を表示できるようにする（§6.4 講義一覧は軽量に保つ） */
+  totalSteps?: number
+  completedSteps?: number
+  /** ステップと対話まで取得済みか。未取得なら選択時に取りに行く */
+  detailLoaded?: boolean
+  /** 開発パネルが投入したモック講義。サーバーへ問い合わせない目印 */
+  isMock?: boolean
 }
 
 export interface Attempt {

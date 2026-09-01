@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { MOCK_USER, useCurrentCourse, useStore } from './store'
+import { useCurrentCourse, useStore } from './store'
+import { ApiFailure, api, courseFromDetail } from './api'
 import { StoreProvider } from './StoreProvider'
 import { useIsMobile } from './hooks/useMediaQuery'
 import { useKeyboardOpen } from './hooks/useKeyboardOpen'
@@ -35,6 +36,30 @@ function Content() {
 function Dialogs() {
   const { state, dispatch } = useStore()
   const [renameValue, setRenameValue] = useState('')
+  const [creating, setCreating] = useState(false)
+
+  /**
+   * §4.1.4 講義作成。作成を投げたあと、生成中の講義を1件取得して一覧へ載せる。
+   * 生成の完了は待たない（3分前後かかるため）。進捗は SC-05 のポーリングが追う（§7.4）。
+   */
+  async function submitCreate() {
+    setCreating(true)
+    try {
+      const title = state.draftTitle.trim()
+      const { courseId } = await api.createCourse(title || null, state.draftMarkdown)
+      const detail = await api.course(courseId)
+      dispatch({ type: 'courseCreated', course: courseFromDetail(detail) })
+    } catch (err) {
+      // 文字数違反・月間上限（§8.2.4）・起動失敗はいずれもここに落ちる。
+      // 入力は破棄せず、オーバーレイに留めたまま理由を出す（§4.1.5）
+      dispatch({
+        type: 'setCreateError',
+        message: err instanceof ApiFailure ? err.message : '講義の作成に失敗しました',
+      })
+    } finally {
+      setCreating(false)
+    }
+  }
 
   const menu = state.menu
   const modal = state.modal
@@ -60,53 +85,74 @@ function Dialogs() {
             {menu.type === 'user' ? (
               <>
                 <div className="border-b border-slate-100 px-3 py-2.5">
-                  <p className="text-sm font-medium text-slate-800">{MOCK_USER.name}</p>
-                  <p className="truncate text-xs text-slate-500">{MOCK_USER.email}</p>
+                  <p className="text-sm font-medium text-slate-800">{state.user?.name ?? ''}</p>
+                  <p className="truncate text-xs text-slate-500">{state.user?.email ?? ''}</p>
                 </div>
                 <button
-                  onClick={() => dispatch({ type: 'logout' })}
+                  onClick={() => {
+                    // セッション Cookie はサーバー側で落とす。失敗しても画面は未ログインへ戻す
+                    void api.logout().catch(() => undefined)
+                    dispatch({ type: 'logout' })
+                  }}
                   className="mt-1 w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100"
                 >
                   ログアウト
                 </button>
               </>
             ) : (
-              menuCourse && (
-                <>
-                  <div className="px-3 pt-2.5 pb-1">
-                    <label className="text-[11px] font-medium text-slate-500">名前を変更</label>
-                    <div className="mt-1.5 flex gap-1.5">
-                      <input
-                        autoFocus
-                        defaultValue={menuCourse.title}
-                        onChange={(e) => setRenameValue(e.target.value)}
-                        className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm outline-none focus:border-indigo-400"
-                      />
-                      <button
-                        onClick={() =>
-                          dispatch({
-                            type: 'renameCourse',
-                            courseId: menuCourse.id,
-                            title: (renameValue || menuCourse.title).trim() || menuCourse.title,
-                          })
-                        }
-                        className="shrink-0 rounded-lg bg-slate-900 px-3 text-xs font-medium text-white"
-                      >
-                        保存
-                      </button>
-                    </div>
+              menuCourse &&
+              (menu.renaming ? (
+                // 「名前を変更」を選んだ後。その場で編集する（§3.5 SC-13）
+                <div className="px-3 pt-2.5 pb-1">
+                  <label className="text-[11px] font-medium text-slate-500">名前を変更</label>
+                  <div className="mt-1.5 flex gap-1.5">
+                    <input
+                      autoFocus
+                      defaultValue={menuCourse.title}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm outline-none focus:border-indigo-400"
+                    />
+                    <button
+                      onClick={() =>
+                        dispatch({
+                          type: 'renameCourse',
+                          courseId: menuCourse.id,
+                          title: (renameValue || menuCourse.title).trim() || menuCourse.title,
+                        })
+                      }
+                      className="shrink-0 rounded-lg bg-slate-900 px-3 text-xs font-medium text-white"
+                    >
+                      保存
+                    </button>
                   </div>
+                </div>
+              ) : (
+                <>
+                  <button
+                    onClick={() =>
+                      dispatch({
+                        type: 'openMenu',
+                        menu: { type: 'course', courseId: menuCourse.id, renaming: true },
+                      })
+                    }
+                    className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100"
+                  >
+                    名前を変更
+                  </button>
                   <button
                     onClick={() => {
                       dispatch({ type: 'openMenu', menu: null })
-                      dispatch({ type: 'openModal', modal: { type: 'deleteCourse', courseId: menuCourse.id } })
+                      dispatch({
+                        type: 'openModal',
+                        modal: { type: 'deleteCourse', courseId: menuCourse.id },
+                      })
                     }}
-                    className="mt-1 w-full rounded-lg px-3 py-2 text-left text-sm text-rose-600 transition hover:bg-rose-50"
+                    className="w-full rounded-lg px-3 py-2 text-left text-sm text-rose-600 transition hover:bg-rose-50"
                   >
                     削除
                   </button>
                 </>
-              )
+              ))
             )}
           </div>
         </div>
@@ -121,12 +167,21 @@ function Dialogs() {
           <p className="mt-3 text-sm text-slate-500">
             {modal.title} ／ {modal.charCount.toLocaleString()} 文字
           </p>
+          {state.createError && (
+            <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {state.createError}
+            </p>
+          )}
           <DialogButtons>
-            <button className={btnGhost} onClick={() => dispatch({ type: 'openModal', modal: null })}>
+            <button
+              className={btnGhost}
+              disabled={creating}
+              onClick={() => dispatch({ type: 'openModal', modal: null })}
+            >
               キャンセル
             </button>
-            <button className={btnPrimary} onClick={() => dispatch({ type: 'createCourse' })}>
-              作成する
+            <button className={btnPrimary} disabled={creating} onClick={() => void submitCreate()}>
+              {creating ? '作成しています…' : '作成する'}
             </button>
           </DialogButtons>
         </Modal>
@@ -160,6 +215,9 @@ function Shell() {
   const course = useCurrentCourse()
   const isMobile = useIsMobile()
   const keyboardOpen = useKeyboardOpen()
+
+  // 未ログインかどうかが確定する前にログイン画面を出すと、更新のたびに一瞬ちらつく
+  if (!state.booted) return <div className="h-full bg-slate-100" />
 
   if (!state.authed) {
     return (
@@ -202,7 +260,8 @@ function Shell() {
 
         {showLectureChrome && (
           <div className="shrink-0 border-t border-slate-200 bg-slate-100">
-            <PromptInput disabled={course.currentStepId === null} />
+            {/* 質問応答（④）は未接続のため、実データの講義では入力させない */}
+            <PromptInput disabled={course.currentStepId === null || !course.isMock} />
           </div>
         )}
 
@@ -253,7 +312,10 @@ function Shell() {
           )}
         </div>
 
-        {showLectureChrome && <PromptInput disabled={course.currentStepId === null} />}
+        {/* 質問応答（④）は未接続のため、実データの講義では入力させない */}
+        {showLectureChrome && (
+          <PromptInput disabled={course.currentStepId === null || !course.isMock} />
+        )}
 
         {/* SC-03 講義作成オーバーレイ（§4.1）。サイドバーは残し、タブバーとメイン領域を覆う */}
         {state.createOpen && <CreateOverlay />}

@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { MOCK_USER } from '../store'
 import { useStore } from '../store'
 import type { Course, Message } from '../types'
 import { Markdown } from '../components/Markdown'
@@ -80,7 +79,11 @@ export function LectureTab({ course }: { course: Course }) {
   const endRef = useRef<HTMLDivElement>(null)
 
   const step = course.steps.find((s) => s.id === course.currentStepId) ?? null
-  const scriptFinished = step ? course.scriptCursor >= step.script.length : false
+  // 台本はモック専用（実データの講義は持たない）。段階3で③の逐次生成に置き換える。
+  // 実データの講義で台本を使った判定を通すと、発話が1つも無いのに
+  // 「次のステップへ進む」が出てしまうため、モックの場合だけ有効にする
+  const isMock = course.isMock === true
+  const scriptFinished = isMock && step ? course.scriptCursor >= (step.script?.length ?? 0) : false
   const allDone = course.currentStepId === null
   const isLast = step ? step.orderIndex === course.steps.length : false
 
@@ -143,9 +146,22 @@ export function LectureTab({ course }: { course: Course }) {
         </div>
       )}
 
-      <p className="pt-1 text-center text-[11px] text-slate-400">
-        {MOCK_USER.name} さんの学習ログはこの端末に保持されません（UIモック）
-      </p>
+      {!isMock && course.messages.length === 0 && (
+        <div className="rounded-xl border border-slate-200 bg-white px-5 py-6 text-center">
+          <p className="text-sm font-medium text-slate-700">受講はまだ接続していません</p>
+          <p className="mt-2 text-xs leading-relaxed text-slate-500">
+            講義本文の生成（③）と質問応答（④）はサーバー側の実装が残っています。
+            <br />
+            教材タブと進捗は実データで表示されます。
+          </p>
+        </div>
+      )}
+
+      {isMock && (
+        <p className="pt-1 text-center text-[11px] text-slate-400">
+          この講義はモックデータです（開発パネルから投入したもの）
+        </p>
+      )}
       <div ref={endRef} />
     </div>
   )
