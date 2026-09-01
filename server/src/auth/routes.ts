@@ -4,7 +4,13 @@ import { googleAuth } from '@hono/oauth-providers/google'
 import type { AppEnv } from '../env'
 import { clearSession, issueSession } from './session'
 import { isAllowed } from './allowlist'
-import { findOrCreateUser } from '../db/users'
+import { verifyPassword } from './password'
+import {
+  findGuestAccount,
+  findOrCreateUser,
+  recordGuestFailure,
+  recordGuestSuccess,
+} from '../db/users'
 
 export const auth = new Hono<AppEnv>()
 
@@ -62,6 +68,69 @@ auth.get('/callback', async (c) => {
   const user = await findOrCreateUser(c.env.DB, profile.email, profile.name ?? profile.email)
   await issueSession(c, user)
   return c.redirect(c.env.APP_ORIGIN)
+})
+
+/**
+ * ゲストサインイン（Q-26）。Google アカウントを持たない相手に、運営が発行した
+ * ID とパスワードで利用してもらう。発行は `npm run guest:add` で行う。
+ */
+const GUEST_MAX_ATTEMPTS = 10
+const GUEST_LOCK_MS = 15 * 60 * 1000
+
+/**
+ * 存在しない ID でも同じだけ時間を使うためのダミー。
+ * 応答の速さで「その ID は存在しない」と分かる状態を避ける。
+ */
+const DUMMY_RECORD = {
+  hash: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+  salt: 'AAAAAAAAAAAAAAAAAAAAAA==',
+  iterations: 210_000,
+}
+
+auth.post('/guest', async (c) => {
+  const body = await c.req.json<{ loginId?: string; password?: string }>().catch(() => null)
+  const loginId = body?.loginId?.trim()
+  const password = body?.password
+  if (!loginId || !password) {
+    return c.json({ error: 'invalid_request', message: 'IDとパスワードを入力してください' }, 400)
+  }
+
+  const account = await findGuestAccount(c.env.DB, loginId)
+  if (!account) {
+    await verifyPassword(password, DUMMY_RECORD)
+    return c.json({ error: 'unauthorized', message: 'IDまたはパスワードが違います' }, 401)
+  }
+
+  if (account.lockedUntil && account.lockedUntil > Date.now()) {
+    const minutes = Math.ceil((account.lockedUntil - Date.now()) / 60000)
+    return c.json(
+      {
+        error: 'locked',
+        message: `試行回数が上限に達しました。${minutes}分ほど時間をおいて再度お試しください。`,
+      },
+      429,
+    )
+  }
+
+  const ok = await verifyPassword(password, {
+    hash: account.passwordHash,
+    salt: account.salt,
+    iterations: account.iterations,
+  })
+  if (!ok) {
+    await recordGuestFailure(c.env.DB, loginId, GUEST_MAX_ATTEMPTS, GUEST_LOCK_MS)
+    // 「ID が無い」と「パスワードが違う」を区別しない。存在の確認に使わせないため
+    return c.json({ error: 'unauthorized', message: 'IDまたはパスワードが違います' }, 401)
+  }
+
+  await recordGuestSuccess(c.env.DB, loginId)
+  await issueSession(c, {
+    id: account.userId,
+    email: account.email,
+    displayName: account.displayName,
+    kind: 'guest',
+  })
+  return c.body(null, 204)
 })
 
 /**

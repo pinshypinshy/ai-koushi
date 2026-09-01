@@ -25,9 +25,11 @@ export const courses = new Hono<AppEnv>()
 export const MATERIAL_MIN_CHARS = 500
 export const MATERIAL_MAX_CHARS = 80_000
 
-/** §8.2.3 の上限値 */
-const MONTHLY_COURSE_LIMIT = 8
-const MONTHLY_COST_LIMIT_USD = 15
+/** §8.2.3 の上限値。ゲストを絞るのは、費用が利用者ごとに積み上がるため（Q-26） */
+const LIMITS = {
+  google: { courses: 8, costUsd: 15 },
+  guest: { courses: 2, costUsd: 3 },
+} as const
 
 /**
  * 月の境界は JST で判定する。利用者の「今月」の感覚に合わせるためであり、
@@ -49,19 +51,20 @@ function monthStartMs(now: number): number {
  */
 async function creationBlockedReason(
   db: D1Database,
-  userId: string,
+  user: { id: string; kind: 'google' | 'guest' },
   countsAsNewCourse: boolean,
 ): Promise<string | null> {
   const since = monthStartMs(Date.now())
+  const limit = LIMITS[user.kind]
 
-  const cost = await monthlyCostUsd(db, userId, since)
-  if (cost >= MONTHLY_COST_LIMIT_USD) {
-    return `今月のAI利用額が上限（$${MONTHLY_COST_LIMIT_USD}）に達したため、新しい生成を行えません。`
+  const cost = await monthlyCostUsd(db, user.id, since)
+  if (cost >= limit.costUsd) {
+    return `今月のAI利用額が上限（$${limit.costUsd}）に達したため、新しい生成を行えません。`
   }
   if (countsAsNewCourse) {
-    const count = await countCoursesSince(db, userId, since)
-    if (count >= MONTHLY_COURSE_LIMIT) {
-      return `今月の講義作成数が上限（${MONTHLY_COURSE_LIMIT}件）に達しています。`
+    const count = await countCoursesSince(db, user.id, since)
+    if (count >= limit.courses) {
+      return `今月の講義作成数が上限（${limit.courses}件）に達しています。`
     }
   }
   return null
@@ -125,7 +128,7 @@ courses.post('/courses', requireUser, async (c) => {
     )
   }
 
-  const blocked = await creationBlockedReason(c.env.DB, user.id, true)
+  const blocked = await creationBlockedReason(c.env.DB, user, true)
   if (blocked) return c.json({ error: 'limit_exceeded', message: blocked }, 403)
 
   /**
@@ -166,7 +169,7 @@ courses.post('/courses/:id/retry', requireUser, async (c) => {
     return c.json({ error: 'not_failed', message: 'この講義は失敗していません' }, 409)
   }
 
-  const blocked = await creationBlockedReason(c.env.DB, user.id, false)
+  const blocked = await creationBlockedReason(c.env.DB, user, false)
   if (blocked) return c.json({ error: 'limit_exceeded', message: blocked }, 403)
 
   await resetForRetry(c.env.DB, courseId)
@@ -207,7 +210,7 @@ courses.post('/courses/:id/quiz/retry', requireUser, async (c) => {
     return c.json({ error: 'not_failed', message: '確認テストは失敗していません' }, 409)
   }
 
-  const blocked = await creationBlockedReason(c.env.DB, user.id, false)
+  const blocked = await creationBlockedReason(c.env.DB, user, false)
   if (blocked) return c.json({ error: 'limit_exceeded', message: blocked }, 403)
 
   await resetQuizForRetry(c.env.DB, courseId)

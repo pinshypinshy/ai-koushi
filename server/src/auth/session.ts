@@ -13,6 +13,8 @@ export interface SessionUser {
   id: string
   email: string
   displayName: string
+  /** §8.2.3 の上限をゲストだけ絞るため、種別をセッションに載せる（Q-26） */
+  kind: 'google' | 'guest'
 }
 
 const COOKIE_NAME = 'ak_session'
@@ -23,6 +25,8 @@ interface SessionPayload {
   sub: string
   email: string
   name: string
+  /** 種別。この項目を持たない古いセッションは Google として扱う */
+  kind?: 'google' | 'guest'
   exp: number
   [key: string]: unknown
 }
@@ -43,6 +47,7 @@ export async function issueSession(c: Context<AppEnv>, user: SessionUser): Promi
     sub: user.id,
     email: user.email,
     name: user.displayName,
+    kind: user.kind,
     exp: Math.floor(Date.now() / 1000) + MAX_AGE_SEC,
   }
   const token = await sign(payload, c.env.SESSION_SECRET, ALG)
@@ -64,7 +69,12 @@ export async function readSession(c: Context<AppEnv>): Promise<SessionUser | nul
   if (!token) return null
   try {
     const payload = (await verify(token, c.env.SESSION_SECRET, ALG)) as unknown as SessionPayload
-    return { id: payload.sub, email: payload.email, displayName: payload.name }
+    return {
+      id: payload.sub,
+      email: payload.email,
+      displayName: payload.name,
+      kind: payload.kind ?? 'google',
+    }
   } catch {
     // 署名不正・期限切れはいずれも「未ログイン」として扱う
     return null

@@ -12,6 +12,16 @@ import type {
   SendMessageRequest,
 } from '../../shared/api'
 import type { Course } from './types'
+import {
+  demoAttempt,
+  demoBootstrap,
+  demoCompleteStep,
+  demoCourse,
+  demoMaterial,
+  demoQuiz,
+  demoStreamTurn,
+  isDemo,
+} from './demo'
 
 /**
  * サーバーとの通信をここに集約する。画面からは fetch を直接呼ばない。
@@ -48,14 +58,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
  */
 export const LOGIN_URL = '/auth/callback'
 
+/**
+ * サンプル（「画面を見る」）はここで振り分ける。
+ * 画面側にサンプル用の分岐を作らないため、入口を1箇所に閉じている。
+ */
 export const api = {
   bootstrap: (courseId?: string) =>
-    request<BootstrapResponse>(
-      courseId ? `/api/bootstrap?courseId=${encodeURIComponent(courseId)}` : '/api/bootstrap',
-    ),
-  course: (id: string) => request<CourseDetail>(`/api/courses/${encodeURIComponent(id)}`),
+    isDemo()
+      ? Promise.resolve(demoBootstrap())
+      : request<BootstrapResponse>(
+          courseId ? `/api/bootstrap?courseId=${encodeURIComponent(courseId)}` : '/api/bootstrap',
+        ),
+  course: (id: string) =>
+    isDemo()
+      ? Promise.resolve(demoCourse())
+      : request<CourseDetail>(`/api/courses/${encodeURIComponent(id)}`),
   material: (id: string) =>
-    request<MaterialResponse>(`/api/courses/${encodeURIComponent(id)}/material`),
+    isDemo()
+      ? Promise.resolve(demoMaterial())
+      : request<MaterialResponse>(`/api/courses/${encodeURIComponent(id)}/material`),
   createCourse: (title: string | null, material: string) =>
     request<CreateCourseResponse>('/api/courses', {
       method: 'POST',
@@ -68,21 +89,48 @@ export const api = {
     }),
   logout: () => request<unknown>('/auth/logout', { method: 'POST' }),
 
+  /**
+   * ゲストサインイン（Q-26）。運営が発行した ID とパスワードで入る。
+   * 成功時は本文を持たない（セッションは Cookie で渡される）。
+   */
+  guestLogin: async (loginId: string, password: string) => {
+    const res = await fetch('/auth/guest', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ loginId, password }),
+    })
+    if (!res.ok) {
+      const body = await res
+        .json()
+        .then((v) => v as Partial<ApiError>)
+        .catch(() => ({}) as Partial<ApiError>)
+      throw new ApiFailure(res.status, body.error ?? 'unknown', body.message ?? 'サインインできませんでした')
+    }
+  },
+
   /** 確認テストの出題（§4.3.1）。正解と解説は含まれない */
-  quiz: (courseId: string) => request<QuizResponse>(`/api/courses/${encodeURIComponent(courseId)}/quiz`),
+  quiz: (courseId: string) =>
+    isDemo()
+      ? Promise.resolve(demoQuiz())
+      : request<QuizResponse>(`/api/courses/${encodeURIComponent(courseId)}/quiz`),
   /** 解答の判定（§4.3.2）。正誤・正解・解説はここで初めて渡される */
   attempt: (questionId: string, selectedChoiceId: string) =>
-    request<AttemptResult>(`/api/questions/${encodeURIComponent(questionId)}/attempts`, {
+    isDemo()
+      ? Promise.resolve(demoAttempt(questionId, selectedChoiceId))
+      : request<AttemptResult>(`/api/questions/${encodeURIComponent(questionId)}/attempts`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ selectedChoiceId }),
-    }),
+        }),
   /** ステップ完了（§4.2.2）。⑤の要約を作り、現在地を次へ移した講義が返る */
   completeStep: (courseId: string, stepId: string) =>
-    request<CourseDetail>(
+    isDemo()
+      ? Promise.resolve(demoCompleteStep(stepId))
+      : request<CourseDetail>(
       `/api/courses/${encodeURIComponent(courseId)}/steps/${encodeURIComponent(stepId)}/complete`,
-      { method: 'POST' },
-    ),
+          { method: 'POST' },
+        ),
   renameCourse: (courseId: string, title: string) =>
     request<{ courseId: string; title: string }>(`/api/courses/${encodeURIComponent(courseId)}`, {
       method: 'PATCH',
@@ -111,6 +159,8 @@ export async function streamTurn(
   body: SendMessageRequest | null,
   onDelta: (text: string) => void,
 ): Promise<ApiMessage> {
+  if (isDemo()) return demoStreamTurn(body?.text ?? null, onDelta)
+
   const res = await fetch(path, {
     method: 'POST',
     credentials: 'same-origin',
