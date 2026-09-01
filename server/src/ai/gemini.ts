@@ -272,8 +272,12 @@ export class GeminiClient implements AiClient {
             systemInstruction: summarySystemPrompt(),
             // 思考トークンは課金上の出力に算入される。実測では200文字の要約に対して
             // 出力313トークンが計上されており、大半が思考だった。
-            // §5.5 のとおり定型的な要約であり、思考を要する処理ではない
-            thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+            // §5.5 のとおり定型的な要約であり、思考を要する処理ではない。
+            //
+            // ただし MINIMAL は gemini-3.7-flash が受け付けず 400 を返す
+            // （2026-09-01 の実測。"Thinking level MINIMAL is not supported for this model"）。
+            // このモデルで指定できる下限が LOW であるため、③④と同じ水準に置く
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           },
         }),
       )
