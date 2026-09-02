@@ -16,7 +16,13 @@ export const ITERATIONS = 100_000
 const KEY_BITS = 256
 /** 紛らわしい文字（0/O、1/l/I）を外す。口頭やメモで伝える場面を想定している */
 const ALPHABET = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-const PASSWORD_LENGTH = 16
+/**
+ * 口頭やメモで伝える場面を想定し、書き写せる長さに抑える。
+ * 57種類から8文字で約47ビットあり、オンラインの総当たりは10回失敗で15分
+ * ロックする（§4.6）ため、この長さで足りる。
+ * 短くしても既存のゲストは影響を受けない（照合は保存済みの導出鍵に対して行う）。
+ */
+const PASSWORD_LENGTH = 8
 
 export function generatePassword() {
   const bytes = new Uint8Array(PASSWORD_LENGTH * 2)
