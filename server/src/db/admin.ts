@@ -35,6 +35,8 @@ export async function getAdminSummary(db: D1Database, periodStart: number): Prom
          (SELECT COUNT(*) FROM users WHERE is_admin = 1) AS admins,
          (SELECT COUNT(*) FROM allowed_emails) AS allowed_emails,
          (SELECT COUNT(*) FROM courses) AS courses,
+         -- 全体の実件数。利用者行の courses_month（上限判定と同じ数え方）とは違い、
+         -- 複製も含める。ここは上限と突き合わせる値ではなく、稼働の把握が目的である
          (SELECT COUNT(*) FROM courses WHERE created_at >= ?1) AS courses_month,
          (SELECT COALESCE(SUM(estimated_cost_usd), 0) FROM ai_usage_logs
            WHERE created_at >= ?1) AS cost_month,
@@ -122,8 +124,11 @@ const USER_SELECT_SQL = `
   SELECT u.id, u.email, u.display_name, u.kind, u.is_admin, u.created_at,
          ${LAST_LOGIN_SQL} AS last_login_at,
          (SELECT COUNT(*) FROM courses c WHERE c.user_id = u.id) AS courses,
+         -- 複製（duplicated_from が入る行）は数えない。courseLimit と並べて出す値であり、
+         -- 実際にブロックされる境界（countCoursesSince、Q-30）と数え方を揃える
          (SELECT COUNT(*) FROM courses c
-           WHERE c.user_id = u.id AND c.created_at >= ?1) AS courses_month,
+           WHERE c.user_id = u.id AND c.created_at >= ?1
+             AND c.duplicated_from IS NULL) AS courses_month,
          (SELECT COALESCE(SUM(l.estimated_cost_usd), 0) FROM ai_usage_logs l
            WHERE l.user_id = u.id AND l.created_at >= ?1) AS cost_month,
          (SELECT COALESCE(SUM(l.estimated_cost_usd), 0) FROM ai_usage_logs l

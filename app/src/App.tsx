@@ -40,6 +40,8 @@ function Dialogs() {
   const [renameValue, setRenameValue] = useState('')
   const [creating, setCreating] = useState(false)
   const [busy, setBusy] = useState(false)
+  /** 複製の失敗理由（§4.5）。費用上限（403）もここに出る */
+  const [duplicateError, setDuplicateError] = useState<string | null>(null)
 
   /** §4.5 リネーム。サーバーへ反映してから画面を更新する */
   async function submitRename(courseId: string, title: string) {
@@ -62,6 +64,24 @@ function Dialogs() {
       dispatch({ type: 'deleteCourse', courseId })
     } catch {
       dispatch({ type: 'openModal', modal: null })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /**
+   * §4.5 複製。教材とステップ分割を引き継ぎ、対話ログ・解答記録・進捗を持たない
+   * 講義を作る。AI を呼ばないため生成待ちは無く、応答の講義をそのまま一覧へ載せる。
+   */
+  async function submitDuplicate(courseId: string) {
+    setBusy(true)
+    setDuplicateError(null)
+    try {
+      const detail = await api.duplicateCourse(courseId)
+      dispatch({ type: 'courseDuplicated', course: courseFromDetail(detail) })
+    } catch (err) {
+      // 費用上限（§8.2.4）と生成中の講義の複製はここに落ちる。ダイアログは閉じずに理由を出す
+      setDuplicateError(err instanceof ApiFailure ? err.message : '講義を複製できませんでした')
     } finally {
       setBusy(false)
     }
@@ -170,6 +190,19 @@ function Dialogs() {
                   </button>
                   <button
                     onClick={() => {
+                      setDuplicateError(null)
+                      dispatch({ type: 'openMenu', menu: null })
+                      dispatch({
+                        type: 'openModal',
+                        modal: { type: 'duplicateCourse', courseId: menuCourse.id },
+                      })
+                    }}
+                    className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100"
+                  >
+                    複製
+                  </button>
+                  <button
+                    onClick={() => {
                       dispatch({ type: 'openMenu', menu: null })
                       dispatch({
                         type: 'openModal',
@@ -211,6 +244,40 @@ function Dialogs() {
             </button>
             <button className={btnPrimary} disabled={creating} onClick={() => void submitCreate()}>
               {creating ? '作成しています…' : '作成する'}
+            </button>
+          </DialogButtons>
+        </Modal>
+      )}
+
+      {/* SC-18 複製確認ダイアログ（§4.5） */}
+      {modal?.type === 'duplicateCourse' && (
+        <Modal onClose={() => dispatch({ type: 'openModal', modal: null })} labelledBy="dlg-dup">
+          <h2 id="dlg-dup" className="text-base font-bold text-slate-900">
+            「{state.courses.find((c) => c.id === modal.courseId)?.title}」を複製しますか？
+          </h2>
+          <p className="mt-3 text-sm leading-relaxed text-slate-500">
+            教材・ステップ分割・確認テストの設問はそのまま引き継ぎ、対話ログ・解答記録・進捗を
+            空にした講義を作ります。AIは使わないため、講義の作成数は消費しません。
+          </p>
+          {duplicateError && (
+            <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {duplicateError}
+            </p>
+          )}
+          <DialogButtons>
+            <button
+              className={btnGhost}
+              disabled={busy}
+              onClick={() => dispatch({ type: 'openModal', modal: null })}
+            >
+              キャンセル
+            </button>
+            <button
+              className={btnPrimary}
+              disabled={busy}
+              onClick={() => void submitDuplicate(modal.courseId)}
+            >
+              {busy ? '複製しています…' : '複製する'}
             </button>
           </DialogButtons>
         </Modal>

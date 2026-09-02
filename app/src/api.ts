@@ -14,6 +14,7 @@ import type {
   CourseDetail,
   CourseSummary,
   CreateCourseResponse,
+  DuplicateCourseResponse,
   LectureStreamLine,
   MaterialResponse,
   QuizResponse,
@@ -100,6 +101,14 @@ export const api = {
     }),
   retryCourse: (id: string) =>
     request<CreateCourseResponse>(`/api/courses/${encodeURIComponent(id)}/retry`, {
+      method: 'POST',
+    }),
+  /**
+   * 講義の複製（§4.5）。AI を呼ばないため生成待ちが無く、複製後の講義がそのまま返る。
+   * 利用状況（A-5）は変わらないので取り直さない。
+   */
+  duplicateCourse: (id: string) =>
+    request<DuplicateCourseResponse>(`/api/courses/${encodeURIComponent(id)}/duplicate`, {
       method: 'POST',
     }),
   logout: () => request<unknown>('/auth/logout', { method: 'POST' }),

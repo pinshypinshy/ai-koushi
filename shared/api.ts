@@ -146,6 +146,15 @@ export interface CreateCourseResponse {
 }
 
 /**
+ * 講義の複製（§4.5、Q-30）。教材・ステップ分割・確認テストの設問は引き継ぎ、
+ * 対話ログ・解答記録・進行状況だけを持たない講義を作る。
+ *
+ * 作成（CreateCourseResponse）と違って生成を待つ必要が無いため、IDではなく講義そのものを
+ * 返す。IDだけ返して取り直させると往復が1つ増える（§7.6）。
+ */
+export type DuplicateCourseResponse = CourseDetail
+
+/**
  * 講義本文（③）・質問応答（④）のストリーミング1行ぶん。
  *
  * 応答は NDJSON（1行1件のJSON）で流す。文字の断片だけでなく、保存された発言の id と
@@ -204,6 +213,7 @@ export interface AdminSummary {
   admins: number
   allowedEmails: number
   courses: number
+  /** 全体の実件数。利用者行と違い複製（§4.5）も含める。上限と突き合わせる値ではない */
   coursesThisMonth: number
   costThisMonthUsd: number
   costTotalUsd: number
@@ -229,6 +239,7 @@ export interface AdminUserRow {
   createdAt: number
   lastLoginAt: number | null
   courses: number
+  /** 上限判定と同じ数え方をする。複製は AI を呼ばないため数えない（Q-30） */
   coursesThisMonth: number
   courseLimit: number
   costThisMonthUsd: number

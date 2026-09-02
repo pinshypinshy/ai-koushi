@@ -29,6 +29,8 @@ export type ModalState =
   | null
   | { type: 'confirmCreate'; title: string; charCount: number }
   | { type: 'deleteCourse'; courseId: string }
+  /** 複製の確認（SC-18、§4.5）。courseId は複製元 */
+  | { type: 'duplicateCourse'; courseId: string }
 
 export type MenuState =
   | null
@@ -125,6 +127,11 @@ export type Action =
   /** サーバーから取り直した講義で置き換える（選択時・生成中のポーリング・ステップ完了） */
   | { type: 'courseUpdated'; course: Course }
   | { type: 'courseCreated'; course: Course }
+  /**
+   * 複製した講義（§4.5）。courseCreated を使い回さないのは、あちらが作成
+   * オーバーレイの下書きを消すため。サイドバーからの複製で書きかけが飛ぶのは §4.1.5 に反する。
+   */
+  | { type: 'courseDuplicated'; course: Course }
   | { type: 'materialLoaded'; courseId: string; markdown: string }
   | { type: 'setCreateError'; message: string | null }
   | { type: 'selectCourse'; id: string }
@@ -241,6 +248,20 @@ export function reducer(s: State, action: Action): State {
         draftTitle: '',
         draftMarkdown: '',
         createError: null,
+      }
+    case 'courseDuplicated':
+      return {
+        ...s,
+        courses: [action.course, ...s.courses],
+        selectedCourseId: action.course.id,
+        tab: 'lecture',
+        modal: null,
+        menu: null,
+        drawerOpen: false,
+        // 選択が変わるため、受験状態と受信中の発話は持ち越さない（selectCourse と同じ）
+        quiz: emptyQuiz,
+        streaming: null,
+        streamError: null,
       }
     case 'materialLoaded':
       return {

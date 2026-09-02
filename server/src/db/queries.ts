@@ -454,14 +454,22 @@ export async function resetQuizForRetry(db: D1Database, courseId: string): Promi
     .run()
 }
 
-/** §8.2.3「月間の講義作成数 8件」の判定に使う */
+/**
+ * §8.2.3「月間の講義作成数 8件」の判定に使う。
+ *
+ * 複製（duplicated_from が入っている講義）は数えない（Q-30）。上限は AI の費用を
+ * 抑えるために置いたものであり、複製は AI を呼ばないためである。
+ */
 export async function countCoursesSince(
   db: D1Database,
   userId: string,
   since: number,
 ): Promise<number> {
   const row = await db
-    .prepare('SELECT COUNT(*) AS n FROM courses WHERE user_id = ?1 AND created_at >= ?2')
+    .prepare(
+      `SELECT COUNT(*) AS n FROM courses
+       WHERE user_id = ?1 AND created_at >= ?2 AND duplicated_from IS NULL`,
+    )
     .bind(userId, since)
     .first<{ n: number }>()
   return row?.n ?? 0
@@ -831,4 +839,189 @@ export async function renameCourse(
     .bind(courseId, userId, title, Date.now())
     .run()
   return (res.meta.changes ?? 0) > 0
+}
+
+/**
+ * 講義の複製（§4.5、Q-30）。
+ *
+ * 教材・ステップ分割・確認テストの設問はそのまま引き継ぎ、受講の記録（messages）・
+ * 解答記録（attempts）・ステップの進行状況だけを持たない講義を新しく作る。AI は呼ばない。
+ *
+ * 設問（questions / choices / question_steps）まで複写するのは、これが「履歴」ではなく
+ * ②の生成物であるため。作り直せば AI 費用が発生し、複製の目的（費用ゼロでの再受講）が消える。
+ *
+ * course_caches は引き継がない。キャッシュは (course_id, model) の組で保持し、Google 側の
+ * 実体は TTL で消えるため、新しい講義の初回利用時に作り直させる方が生存期間の管理が単純になる。
+ *
+ * 所有者の検証はルート側で済んでいるが、読み取りにも user_id を含めて二重に絞る（SEC-2）。
+ */
+export async function duplicateCourse(
+  db: D1Database,
+  userId: string,
+  sourceId: string,
+): Promise<string | null> {
+  // 読み取りも1回のバッチにまとめる。教材本文だけは INSERT ... SELECT で DB の中を通す
+  const [courseRes, stepRes, questionRes, choiceRes, linkRes] = await db.batch([
+    db
+      .prepare('SELECT title, quiz_status FROM courses WHERE id = ?1 AND user_id = ?2')
+      .bind(sourceId, userId),
+    db
+      .prepare(
+        `SELECT s.id, s.order_index, s.title, s.objective, s.key_points, s.source_ref
+         FROM steps s JOIN courses c ON c.id = s.course_id
+         WHERE s.course_id = ?1 AND c.user_id = ?2 ORDER BY s.order_index`,
+      )
+      .bind(sourceId, userId),
+    db
+      .prepare(
+        `SELECT q.id, q.order_index, q.stem, q.explanation
+         FROM questions q JOIN courses c ON c.id = q.course_id
+         WHERE q.course_id = ?1 AND c.user_id = ?2 ORDER BY q.order_index`,
+      )
+      .bind(sourceId, userId),
+    db
+      .prepare(
+        `SELECT ch.question_id, ch.order_index, ch.body, ch.is_correct
+         FROM choices ch
+         JOIN questions q ON q.id = ch.question_id
+         JOIN courses c ON c.id = q.course_id
+         WHERE q.course_id = ?1 AND c.user_id = ?2
+         ORDER BY ch.question_id, ch.order_index`,
+      )
+      .bind(sourceId, userId),
+    db
+      .prepare(
+        `SELECT qs.question_id, qs.step_id
+         FROM question_steps qs
+         JOIN questions q ON q.id = qs.question_id
+         JOIN courses c ON c.id = q.course_id
+         WHERE q.course_id = ?1 AND c.user_id = ?2`,
+      )
+      .bind(sourceId, userId),
+  ])
+
+  const source = (courseRes.results as unknown as { title: string; quiz_status: string }[])[0]
+  if (!source) return null
+
+  const stepRows = stepRes.results as unknown as {
+    id: string
+    order_index: number
+    title: string
+    objective: string
+    key_points: string
+    source_ref: string | null
+  }[]
+  const questionRows = questionRes.results as unknown as {
+    id: string
+    order_index: number
+    stem: string
+    explanation: string
+  }[]
+  const choiceRows = choiceRes.results as unknown as {
+    question_id: string
+    order_index: number
+    body: string
+    is_correct: number
+  }[]
+  const linkRows = linkRes.results as unknown as { question_id: string; step_id: string }[]
+
+  // 複写先のIDを先に決めておく。question_steps が両方のIDを要るため対応表として持つ
+  const stepIdMap = new Map(stepRows.map((row) => [row.id, crypto.randomUUID()]))
+  const questionIdMap = new Map(questionRows.map((row) => [row.id, crypto.randomUUID()]))
+
+  const now = Date.now()
+  const newCourseId = crypto.randomUUID()
+  const firstStepId = stepRows[0] ? (stepIdMap.get(stepRows[0].id) ?? null) : null
+
+  const statements: D1PreparedStatement[] = [
+    /**
+     * 講義本体を先に入れる（steps の外部キーが courses を参照するため）。
+     * status は ready 固定、quiz_status は複製元の値をそのまま引き継ぐ（テストが
+     * 失敗している講義を複製しても、その事実は残す）。current_step_id は第1ステップに置き、
+     * 受講は最初からやり直す（§4.2）。
+     */
+    db
+      .prepare(
+        `INSERT INTO courses
+           (id, user_id, title, status, quiz_status, phase, current_step_id,
+            duplicated_from, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 'ready', ?4, NULL, ?5, ?6, ?7, ?7)`,
+      )
+      .bind(
+        newCourseId,
+        userId,
+        `${source.title}（複製）`,
+        source.quiz_status,
+        firstStepId,
+        sourceId,
+        now,
+      ),
+    // 教材は最大240KB になるため、本文を Worker に載せず DB の中だけで複写する
+    db
+      .prepare(
+        `INSERT INTO materials (id, course_id, raw_markdown, char_count, created_at)
+         SELECT ?1, ?2, raw_markdown, char_count, ?3 FROM materials WHERE course_id = ?4`,
+      )
+      .bind(crypto.randomUUID(), newCourseId, now, sourceId),
+  ]
+
+  // status / summary / completed_at は指定しない。進行状況は引き継がない（既定は not_started）
+  for (const row of stepRows) {
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO steps (id, course_id, order_index, title, objective, key_points, source_ref)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+        )
+        .bind(
+          stepIdMap.get(row.id)!,
+          newCourseId,
+          row.order_index,
+          row.title,
+          row.objective,
+          row.key_points,
+          row.source_ref,
+        ),
+    )
+  }
+
+  for (const row of questionRows) {
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO questions (id, course_id, order_index, stem, explanation, created_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+        )
+        .bind(questionIdMap.get(row.id)!, newCourseId, row.order_index, row.stem, row.explanation, now),
+    )
+  }
+
+  // 選択肢の並びは複製元のまま保つ。正解位置のシャッフルは生成時に済んでいる（§4.3.1）
+  for (const row of choiceRows) {
+    const questionId = questionIdMap.get(row.question_id)
+    if (!questionId) continue
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO choices (id, question_id, order_index, body, is_correct)
+           VALUES (?1, ?2, ?3, ?4, ?5)`,
+        )
+        .bind(crypto.randomUUID(), questionId, row.order_index, row.body, row.is_correct),
+    )
+  }
+
+  for (const row of linkRows) {
+    const questionId = questionIdMap.get(row.question_id)
+    const stepId = stepIdMap.get(row.step_id)
+    if (!questionId || !stepId) continue
+    statements.push(
+      db
+        .prepare('INSERT INTO question_steps (question_id, step_id) VALUES (?1, ?2)')
+        .bind(questionId, stepId),
+    )
+  }
+
+  // 全体を1バッチにするのは、設問だけ入って選択肢が無い講義を作らないため（saveQuiz と同じ）
+  await db.batch(statements)
+  return newCourseId
 }

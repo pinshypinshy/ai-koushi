@@ -5,6 +5,7 @@ import { requireUser } from '../auth/session'
 import {
   createCourse,
   deleteCourse,
+  duplicateCourse,
   getCourseDetail,
   getCourseState,
   getMaterial,
@@ -29,8 +30,8 @@ export const MATERIAL_MAX_CHARS = 80_000
  *
  * 計上には AI 呼び出しの完了までのずれがあるが、集計遅延が数時間ある課金側の
  * 上限（二層目）に対して、こちらは即時に効く層として置く。
- * countsAsNewCourse を分けているのは、再試行が §8.2.3 の「月間の講義作成数」を
- * 消費しないため。失敗した生成のやり直しは新しい講義ではない。
+ * countsAsNewCourse を分けているのは、再試行と複製が §8.2.3 の「月間の講義作成数」を
+ * 消費しないため。失敗した生成のやり直しは新しい講義ではなく、複製は AI を呼ばない（Q-30）。
  */
 async function creationBlockedReason(
   db: D1Database,
@@ -207,6 +208,51 @@ courses.post('/courses/:id/quiz/retry', requireUser, async (c) => {
   }
 
   return c.json({ courseId }, 202)
+})
+
+/**
+ * 講義の複製（§4.5、Q-30）。教材・ステップ分割・確認テストの設問を引き継ぎ、
+ * 対話ログ・解答記録・進行状況だけを初期化した講義を作る。AI は呼ばない。
+ *
+ * 費用の上限（§8.2.4）だけは掛ける。複製そのものは無料でも、複製した講義を受講すれば
+ * ③④が動くためである。一方で「月間の講義作成数」は消費させない（countsAsNewCourse=false）。
+ * 応答は複製後の講義そのもの。生成を待つ必要が無いため、IDだけ返して取り直させない（§7.6）。
+ */
+courses.post('/courses/:id/duplicate', requireUser, async (c) => {
+  const user = c.get('user')
+  const sourceId = c.req.param('id')
+
+  const state = await getCourseState(c.env.DB, user.id, sourceId)
+  if (!state) return c.json({ error: 'not_found', message: '講義が見つかりません' }, 404)
+  // 骨子が無い講義（生成中・失敗）は複製しても中身が無い
+  if (state.status !== 'ready') {
+    return c.json(
+      { error: 'not_ready', message: '生成が完了していない講義は複製できません' },
+      409,
+    )
+  }
+  /**
+   * 確認テストの再生成中（§4.1.6）は複製しない。pending をそのまま引き写すと、
+   * 対応する Workflow を持たない「生成中」の講義ができ、その表示から戻れなくなる。
+   */
+  if (state.quizStatus === 'pending') {
+    return c.json(
+      { error: 'quiz_generating', message: '確認テストの生成中は複製できません' },
+      409,
+    )
+  }
+
+  const blocked = await creationBlockedReason(c.env.DB, user, false)
+  if (blocked) return c.json({ error: 'limit_exceeded', message: blocked }, 403)
+
+  const newCourseId = await duplicateCourse(c.env.DB, user.id, sourceId)
+  if (!newCourseId) return c.json({ error: 'not_found', message: '講義が見つかりません' }, 404)
+
+  const detail = await getCourseDetail(c.env.DB, user.id, newCourseId)
+  if (!detail) {
+    return c.json({ error: 'duplicate_failed', message: '講義を複製できませんでした' }, 500)
+  }
+  return c.json(detail, 201)
 })
 
 /**
