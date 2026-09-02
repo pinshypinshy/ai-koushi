@@ -5,12 +5,13 @@ import { isDemo } from './demo'
 import { StoreProvider } from './StoreProvider'
 import { useIsMobile } from './hooks/useMediaQuery'
 import { useKeyboardOpen } from './hooks/useKeyboardOpen'
+import { useExitTransition } from './hooks/useExitTransition'
 import { Sidebar } from './components/Sidebar'
 import { TabBar } from './components/TabBar'
 import { ProgressCollapsible, ProgressPanel } from './components/ProgressPanel'
 import { PromptInput } from './components/PromptInput'
 import { Modal, DialogButtons, btnDanger, btnGhost, btnPrimary } from './components/Modal'
-import { IconMenu, IconUser } from './components/Icons'
+import { IconMenu } from './components/Icons'
 import { Login } from './screens/Login'
 import { EmptyState } from './screens/EmptyState'
 import { CreateOverlay } from './screens/CreateOverlay'
@@ -102,9 +103,9 @@ function Dialogs() {
           <div
             className={`absolute w-64 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl ${
               menu.type === 'user'
-                ? // 起動元の隣に出す：モバイルはヘッダーのアカウントアイコン、
-                  // デスクトップはサイドバー最下部のユーザーボタン（A-4）
-                  'top-14 right-3 md:top-auto md:right-auto md:bottom-3 md:left-[16.5rem]'
+                ? // 起動元はモバイル・デスクトップともサイドバー最下部のユーザーボタン（A-4）。
+                  // モバイルではドロワーの中に重ねるため、アカウントセルのすぐ上へ置く
+                  'bottom-16 left-3 md:bottom-3 md:left-[16.5rem]'
                 : // 講義メニューは講義一覧の隣
                   'bottom-24 left-4 md:bottom-auto md:top-28 md:left-[16.5rem]'
             }`}
@@ -242,11 +243,16 @@ function Dialogs() {
   )
 }
 
+/** ドロワーを閉じる動きの長さ。index.css の --animate-drawer-out と合わせる */
+const DRAWER_EXIT_MS = 180
+
 function Shell() {
   const { state, dispatch } = useStore()
   const course = useCurrentCourse()
   const isMobile = useIsMobile()
   const keyboardOpen = useKeyboardOpen()
+  // 閉じる動きを見せるため、drawerOpen が false になっても少しの間そのまま残す
+  const drawer = useExitTransition(state.drawerOpen, DRAWER_EXIT_MS)
 
   // 未ログインかどうかが確定する前にログイン画面を出すと、更新のたびに一瞬ちらつく
   if (!state.booted) return <div className="h-full bg-slate-100" />
@@ -274,13 +280,6 @@ function Shell() {
             <IconMenu className="h-5 w-5" />
           </button>
           <span className="text-sm font-bold text-slate-900">AI講師</span>
-          <button
-            onClick={() => dispatch({ type: 'openMenu', menu: { type: 'user' } })}
-            aria-label="アカウント"
-            className="ml-auto rounded-lg p-1.5 text-slate-600 hover:bg-slate-100"
-          >
-            <IconUser className="h-5 w-5" />
-          </button>
         </header>
 
         {showLectureChrome && <ProgressCollapsible course={course} />}
@@ -302,10 +301,23 @@ function Shell() {
           </div>
         )}
 
-        {state.drawerOpen && (
-          <div className="fixed inset-0 z-40" onClick={() => dispatch({ type: 'setDrawer', open: false })}>
-            <div className="absolute inset-0 bg-slate-900/40" />
-            <div className="absolute inset-y-0 left-0 w-72 max-w-[85%]" onClick={(e) => e.stopPropagation()}>
+        {drawer.mounted && (
+          <div
+            // 退場中は操作を受け付けない。見た目が消えかけた要素を押せると誤操作になる
+            className={`fixed inset-0 z-40 ${drawer.closing ? 'pointer-events-none' : ''}`}
+            onClick={() => dispatch({ type: 'setDrawer', open: false })}
+          >
+            <div
+              className={`absolute inset-0 bg-slate-900/40 ${
+                drawer.closing ? 'animate-overlay-out' : 'animate-overlay-in'
+              }`}
+            />
+            <div
+              className={`absolute inset-y-0 left-0 w-72 max-w-[85%] ${
+                drawer.closing ? 'animate-drawer-out' : 'animate-drawer-in'
+              }`}
+              onClick={(e) => e.stopPropagation()}
+            >
               <Sidebar onClose={() => dispatch({ type: 'setDrawer', open: false })} />
             </div>
           </div>
