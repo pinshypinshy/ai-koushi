@@ -78,6 +78,38 @@ export async function recordUsage(
 }
 
 /** §8.2.4「月間コストが上限の80%で警告、100%で新規作成をブロック」の材料 */
+/**
+ * §8.2.3「月間の講義作成数」。**courses ではなく ai_usage_logs から数える**（Q-30）。
+ *
+ * courses の行数で数えると、講義を削除した時点で今月の件数が1件戻る。複製（§4.5）と
+ * 組み合わせると「作成 → 複製 → 元を削除」で内容を保ったまま枠だけ空けられ、上限が
+ * 意味を失う。ai_usage_logs は講義を削除しても残るため（FK を張っていない）、
+ * 「今月①骨子生成を行った講義の数」で数えれば削除で戻らない。
+ *
+ * MIN(created_at) で絞るのは、月をまたいだ再試行を新規作成として数えないため
+ * （§4.1.6 の再試行は同じ講義に対する2回目の outline として現れる）。
+ * 複製は①を呼ばないので、この数え方では自動的に対象外になる。
+ * Workflow の起動自体に失敗して①を1度も呼べなかった講義も数えない（費用が出ていない）。
+ */
+export async function monthlyCourseCount(
+  db: D1Database,
+  userId: string,
+  since: number,
+): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM (
+         SELECT course_id FROM ai_usage_logs
+          WHERE user_id = ?1 AND purpose = 'outline' AND course_id IS NOT NULL
+          GROUP BY course_id
+         HAVING MIN(created_at) >= ?2
+       )`,
+    )
+    .bind(userId, since)
+    .first<{ n: number }>()
+  return row?.n ?? 0
+}
+
 export async function monthlyCostUsd(db: D1Database, userId: string, since: number): Promise<number> {
   const row = await db
     .prepare(

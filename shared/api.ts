@@ -110,7 +110,10 @@ export interface UsageSummary {
    */
   costUsd: number
   costLimitUsd: number
-  /** 今月に作成した講義の件数。再試行は新規作成として数えない */
+  /**
+   * 今月に作成した講義の件数。ai_usage_logs の①骨子生成から数えるため（Q-30）、
+   * 再試行と複製は含まず、講義を削除しても減らない。
+   */
   courses: number
   courseLimit: number
   /** 集計期間の開始時刻（JST の月初）。「今月」の区切りを利用者の感覚に合わせる */
@@ -213,7 +216,10 @@ export interface AdminSummary {
   admins: number
   allowedEmails: number
   courses: number
-  /** 全体の実件数。利用者行と違い複製（§4.5）も含める。上限と突き合わせる値ではない */
+  /**
+   * 今月に作られた courses の実件数。複製も含み、削除された講義は含まない。
+   * 利用者行（上限判定と同じ数え方）とは別物で、上限と突き合わせる値ではない。
+   */
   coursesThisMonth: number
   costThisMonthUsd: number
   costTotalUsd: number
@@ -239,7 +245,7 @@ export interface AdminUserRow {
   createdAt: number
   lastLoginAt: number | null
   courses: number
-  /** 上限判定と同じ数え方をする。複製は AI を呼ばないため数えない（Q-30） */
+  /** 上限判定と同じ数え方（①骨子生成の回数）。複製は数えず、削除でも減らない（Q-30） */
   coursesThisMonth: number
   courseLimit: number
   costThisMonthUsd: number

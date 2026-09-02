@@ -124,11 +124,15 @@ const USER_SELECT_SQL = `
   SELECT u.id, u.email, u.display_name, u.kind, u.is_admin, u.created_at,
          ${LAST_LOGIN_SQL} AS last_login_at,
          (SELECT COUNT(*) FROM courses c WHERE c.user_id = u.id) AS courses,
-         -- 複製（duplicated_from が入る行）は数えない。courseLimit と並べて出す値であり、
-         -- 実際にブロックされる境界（countCoursesSince、Q-30）と数え方を揃える
-         (SELECT COUNT(*) FROM courses c
-           WHERE c.user_id = u.id AND c.created_at >= ?1
-             AND c.duplicated_from IS NULL) AS courses_month,
+         -- courseLimit と並べて出す値なので、実際にブロックされる境界
+         -- （monthlyCourseCount、Q-30）と同じ数え方にする。courses を数えると
+         -- 講義の削除で件数が戻り、画面の残量と上限判定がずれる
+         (SELECT COUNT(*) FROM (
+            SELECT l.course_id FROM ai_usage_logs l
+             WHERE l.user_id = u.id AND l.purpose = 'outline' AND l.course_id IS NOT NULL
+             GROUP BY l.course_id
+            HAVING MIN(l.created_at) >= ?1
+          )) AS courses_month,
          (SELECT COALESCE(SUM(l.estimated_cost_usd), 0) FROM ai_usage_logs l
            WHERE l.user_id = u.id AND l.created_at >= ?1) AS cost_month,
          (SELECT COALESCE(SUM(l.estimated_cost_usd), 0) FROM ai_usage_logs l

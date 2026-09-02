@@ -1,6 +1,5 @@
 import type { UsageSummary } from '../../shared/api'
-import { monthlyCostUsd } from './ai/usage'
-import { countCoursesSince } from './db/queries'
+import { monthlyCostUsd, monthlyCourseCount } from './ai/usage'
 
 /**
  * §8.2.3 の上限値。ゲストを絞るのは、上限が利用者ごとに数える設計であり、
@@ -36,7 +35,7 @@ export async function getUsageSummary(
   const limit = LIMITS[user.kind]
   const [costUsd, courses] = await Promise.all([
     monthlyCostUsd(db, user.id, periodStart),
-    countCoursesSince(db, user.id, periodStart),
+    monthlyCourseCount(db, user.id, periodStart),
   ])
   return {
     costUsd,

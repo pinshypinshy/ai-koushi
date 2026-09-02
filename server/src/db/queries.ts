@@ -454,27 +454,6 @@ export async function resetQuizForRetry(db: D1Database, courseId: string): Promi
     .run()
 }
 
-/**
- * §8.2.3「月間の講義作成数 8件」の判定に使う。
- *
- * 複製（duplicated_from が入っている講義）は数えない（Q-30）。上限は AI の費用を
- * 抑えるために置いたものであり、複製は AI を呼ばないためである。
- */
-export async function countCoursesSince(
-  db: D1Database,
-  userId: string,
-  since: number,
-): Promise<number> {
-  const row = await db
-    .prepare(
-      `SELECT COUNT(*) AS n FROM courses
-       WHERE user_id = ?1 AND created_at >= ?2 AND duplicated_from IS NULL`,
-    )
-    .bind(userId, since)
-    .first<{ n: number }>()
-  return row?.n ?? 0
-}
-
 // ----------------------------------------------------------------- 受講（③④⑤）
 
 /** ③④のプロンプトに載せる材料（§5.4 のコンテキスト構成） */
