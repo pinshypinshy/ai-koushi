@@ -110,6 +110,13 @@
 - Workers は PBKDF2 の反復回数を 100,000 までしか受け付けない。miniflare は制限が無い
 - `wrangler d1 execute` は `--remote` と `--file` を同時に指定すると取り込み経路に入り、
   SELECT の行を返さない。読み取りは `--command` を使う
+- デプロイ直後に**新しく上げたアセットだけ**が 500 やハングを返すことがある（Cloudflare
+  側の一時障害。2026-09-02 に遭遇）。変更の無いファイルは既存の blob を再利用するため
+  影響しない。再デプロイしても直らない（同じ内容は再アップロードされない）。本番を
+  止めずに確かめるには、`wrangler.jsonc` に一時的に `"preview_urls": true` を足して
+  `wrangler triggers deploy`（配信中のバージョンは変わらない）→ `wrangler versions upload`
+  → プレビューURLでアセットを検証 → 問題なければ `wrangler versions deploy <id>@100%`。
+  壊れた状態で公開してしまったら `wrangler rollback <前のバージョンID>` で即座に戻せる
 
 残っているもの：
 
