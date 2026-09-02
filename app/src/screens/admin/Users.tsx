@@ -154,6 +154,9 @@ function UserTable({
             <span className="flex items-center gap-1">
               {r.kind === 'google' ? 'Google' : <Badge tone="mute">ゲスト</Badge>}
               {r.isAdmin && <Badge tone="warn">管理者</Badge>}
+              {/* 種別の既定値ではなく個別の上限が効いている行（Q-31）。
+                  既定値を変えたときに追従しない行をここで見分ける */}
+              {r.limitOverridden && <Badge tone="ok">個別上限</Badge>}
             </span>
           </Td>
           <Td numeric>

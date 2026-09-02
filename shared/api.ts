@@ -251,6 +251,11 @@ export interface AdminUserRow {
   costThisMonthUsd: number
   costLimitUsd: number
   costTotalUsd: number
+  /**
+   * 上の2つの上限が種別の既定値ではなく、この利用者への個別設定であること（Q-31）。
+   * 既定値を変えたときに追従しない行を運営が見分けられるようにするため
+   */
+  limitOverridden: boolean
 }
 
 /** 利用者詳細に並べる講義。本人の画面（CourseSummary）とは別物で、運営が見る値を足す */

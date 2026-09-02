@@ -33,6 +33,8 @@
 | `npm run admin:add -- <アドレス>` | server。運営管理ページ（§4.7）の権限を付与。一度サインインした利用者のみ |
 | `npm run admin:list` | server。管理者の一覧 |
 | `npm run admin:remove -- <アドレス>` | server。権限を取り消す。最後の1人は `--force` が要る |
+| `npm run limit:set -- <アドレス or ゲストID> [--courses N] [--cost N]` | server。月間上限を利用者ごとに上書き（本番は `--remote`） |
+| `npm run limit:clear -- <アドレス or ゲストID>` | server。上書きを取り消し、種別の既定値へ戻す |
 | `npm run guest:add -- <ID> "<表示名>"` | server。ゲストアカウントを発行（本番は `--remote`） |
 | `npm run guest:reset -- <ID>` | server。パスワード再発行。利用者の行は触らないのでデータは残る |
 
@@ -77,6 +79,10 @@
 - 上限値と月の境界は `server/src/limits.ts` にだけ置く。作成のブロックとサイドバーの
   表示（A-5）は同じ `getUsageSummary()` を見る。二重に定義すると、画面上の残量と
   実際にブロックされる境界がずれる（§8.2.4）
+- 利用者ごとの例外は `users.course_limit` / `cost_limit_usd` に置く（Q-31）。NULL は
+  「種別の既定値に従う」。既定値を DB へ写さない（コマンドの表示にも写さない）。
+  管理ページの利用者行も `limits.ts` と同じ規則で解決する（`db/admin.ts` の
+  `toUserRow`）。片方だけ既定値を返すと、画面の数字と実際の境界がずれる
 - 利用状況の取り直しは AI を消費した後だけにする（`useUsageRefresh`）。起動時は
   bootstrap に同梱して往復を増やさない（§7.6）。定期ポーリングにはしない
 - 使い方ガイド（§4.8）は定型回答のみで AI を呼ばない。回答文に上限件数などの値を写さず、

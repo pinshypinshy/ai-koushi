@@ -83,6 +83,8 @@ interface UserAggregateRow {
   is_admin: number
   created_at: number
   last_login_at: number | null
+  course_limit: number | null
+  cost_limit_usd: number | null
   courses: number
   courses_month: number
   cost_month: number
@@ -101,8 +103,14 @@ const LAST_LOGIN_SQL = `
   )`
 
 function toUserRow(row: UserAggregateRow): AdminUserRow {
-  // 上限は種別で決まる（§8.2.3）。画面側で引き直すと limits.ts と二重定義になる
-  const limit = LIMITS[row.kind]
+  // 上限は種別の既定値（§8.2.3）を個別の上書き（Q-31）で置き換えたもの。
+  // 本人の画面が見る getUsageSummary と同じ規則で解決する。片方だけ既定値を
+  // 返すと、管理ページの数字と実際にブロックされる境界がずれる
+  const base = LIMITS[row.kind]
+  const limit = {
+    courses: row.course_limit ?? base.courses,
+    costUsd: row.cost_limit_usd ?? base.costUsd,
+  }
   return {
     id: row.id,
     email: row.email,
@@ -117,11 +125,13 @@ function toUserRow(row: UserAggregateRow): AdminUserRow {
     costThisMonthUsd: row.cost_month,
     costLimitUsd: limit.costUsd,
     costTotalUsd: row.cost_total,
+    limitOverridden: row.course_limit !== null || row.cost_limit_usd !== null,
   }
 }
 
 const USER_SELECT_SQL = `
   SELECT u.id, u.email, u.display_name, u.kind, u.is_admin, u.created_at,
+         u.course_limit, u.cost_limit_usd,
          ${LAST_LOGIN_SQL} AS last_login_at,
          (SELECT COUNT(*) FROM courses c WHERE c.user_id = u.id) AS courses,
          -- courseLimit と並べて出す値なので、実際にブロックされる境界

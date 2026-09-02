@@ -16,6 +16,31 @@ export const LIMITS = {
 
 export type UserKind = keyof typeof LIMITS
 
+interface Limit {
+  courses: number
+  costUsd: number
+}
+
+/**
+ * 実際に適用する上限。種別の既定値を、利用者ごとの上書き（Q-31）で置き換える。
+ *
+ * 上書きはセッションに載せず毎回 DB を引く。載せると値を変えても Cookie の期限
+ * （30日）まで古い上限のままになり、緩めた側・絞った側のどちらにも即座に効かない。
+ * `users.is_admin` を毎回引くのと同じ理由である（§4.7、Q-27）。
+ */
+async function limitFor(db: D1Database, user: { id: string; kind: UserKind }): Promise<Limit> {
+  const row = await db
+    .prepare('SELECT course_limit, cost_limit_usd FROM users WHERE id = ?1')
+    .bind(user.id)
+    .first<{ course_limit: number | null; cost_limit_usd: number | null }>()
+  const base = LIMITS[user.kind]
+  // NULL は「既定値に従う」。0 を上書き値として認めるため ?? で分岐する
+  return {
+    courses: row?.course_limit ?? base.courses,
+    costUsd: row?.cost_limit_usd ?? base.costUsd,
+  }
+}
+
 /**
  * 月の境界は JST で判定する。利用者の「今月」の感覚に合わせるためであり、
  * 課金プラットフォーム側の集計期間（§8.2.4 の二層目）と一致させる目的ではない。
@@ -32,8 +57,8 @@ export async function getUsageSummary(
   user: { id: string; kind: UserKind },
 ): Promise<UsageSummary> {
   const periodStart = monthStartMs(Date.now())
-  const limit = LIMITS[user.kind]
-  const [costUsd, courses] = await Promise.all([
+  const [limit, costUsd, courses] = await Promise.all([
+    limitFor(db, user),
     monthlyCostUsd(db, user.id, periodStart),
     monthlyCourseCount(db, user.id, periodStart),
   ])
