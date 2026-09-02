@@ -58,13 +58,25 @@ export function Login() {
 
   return (
     <div className="flex h-full flex-col items-center justify-center overflow-y-auto bg-slate-100 px-6 py-10">
-      <div className="w-full max-w-sm text-center">
-        <h1 className="text-3xl font-bold tracking-wide text-slate-900">AI講師</h1>
+      {/*
+        見出しだけ操作部（max-w-sm）より広い枠に置く。説明文を PC で1行に収めるには
+        384px では 1 文字ぶん足らず、「作り／ます」のように語の途中で割れるため。
+        狭い画面では枠が入りきらないので、読点の位置に <br> を出して折る
+      */}
+      <div className="w-full max-w-md text-center">
+        <div className="flex items-center justify-center gap-3">
+          {/* favicon と同じ実体を指す。図形の定義を1箇所に留め、差し替えたときにずれないため */}
+          <img src="/favicon.svg" alt="" width={48} height={48} className="h-12 w-12" />
+          <h1 className="text-3xl font-bold tracking-wide text-slate-900">AI講師</h1>
+        </div>
         <p className="mt-4 text-sm leading-relaxed text-slate-500">
           参考書をアップロードすると、
           <br className="sm:hidden" />
           AIが講義と確認テストを作ります
         </p>
+      </div>
+
+      <div className="w-full max-w-sm text-center">
         <button
           // 認可コードフローの往路。サーバー側で Google へ転送される（§4.6）
           onClick={() => {
