@@ -14,11 +14,19 @@ export function useLectureTurn(course: Course) {
   const { state, dispatch } = useStore()
   const refreshUsage = useUsageRefresh()
   const running = state.streaming !== null
-  const stepId = course.currentStepId
+  /**
+   * 発言を紐づけるステップ。全ステップ完了後は現在地が無いため最後のステップを使う
+   * （§4.2.4、Q-32）。messages.step_id は NOT NULL であり、サーバー側も同じ規則で解決する
+   */
+  const allCompleted = course.currentStepId === null
+  const stepId = course.currentStepId ?? course.steps[course.steps.length - 1]?.id ?? null
 
   const run = useCallback(
     async (question: string | null) => {
       if (!stepId || running) return
+      // 完了後に受け付けるのは質問（④）だけ。講義本文（③）を送るとサーバーでも 409 になり、
+      // 「全ステップが完了しました」の表示の下に解説が再び流れてしまう（Q-32）
+      if (question === null && allCompleted) return
       dispatch({ type: 'streamStart', stepId })
       try {
         if (question !== null) {
@@ -79,7 +87,7 @@ export function useLectureTurn(course: Course) {
           .catch(() => undefined)
       }
     },
-    [course.id, stepId, running, dispatch, refreshUsage],
+    [course.id, stepId, allCompleted, running, dispatch, refreshUsage],
   )
 
   return {

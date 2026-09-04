@@ -60,6 +60,11 @@ export interface LectureContext {
   currentStep: OutlineStep
   /** 現ステップ内の全メッセージ。過去ステップは completedSummaries で表現する */
   history: Turn[]
+  /**
+   * 全ステップ完了後か（§4.2.4、Q-32）。完了後は currentStep が「最後に扱ったステップ」を指し、
+   * 「後続ステップで扱う」「本筋へ戻す」という④の指示が成り立たなくなるため区別する
+   */
+  allCompleted: boolean
 }
 
 export interface AiClient {

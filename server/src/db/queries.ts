@@ -464,6 +464,8 @@ export interface LectureContextRow {
   currentStep: OutlineStep
   currentStepId: string
   history: Turn[]
+  /** 全ステップ完了後か（§4.2.4、Q-32）。③を止め④だけを通す判断に使う */
+  allCompleted: boolean
 }
 
 /**
@@ -492,7 +494,7 @@ export async function loadLectureContext(
   ])
 
   const course = (courseRes.results as unknown as { current_step_id: string | null }[])[0]
-  if (!course?.current_step_id) return null
+  if (!course) return null
   const material = (materialRes.results as unknown as { raw_markdown: string }[])[0]?.raw_markdown
   if (material === undefined) return null
 
@@ -507,7 +509,16 @@ export async function loadLectureContext(
     sourceRef: row.source_ref ?? '',
   })
 
-  const currentRow = rows.find((r) => r.id === course.current_step_id)
+  /**
+   * 全ステップ完了後は current_step_id が NULL になる（completeStep）。
+   * その場合は最後のステップを文脈上の「現在地」として使い、質問応答（④）だけを続けられるようにする
+   * （§4.2.4、Q-32）。DB の現在地を書き戻さないのは、書き戻すと講義が未完了に戻り、
+   * 完了バナー・確認テストへの誘導・管理ページの完了判定まで巻き戻るため。
+   */
+  const allCompleted = course.current_step_id === null
+  const currentRow = allCompleted
+    ? rows[rows.length - 1]
+    : rows.find((r) => r.id === course.current_step_id)
   if (!currentRow) return null
 
   const { results: messageRows } = await db
@@ -529,6 +540,7 @@ export async function loadLectureContext(
       })),
     currentStep: toOutline(currentRow),
     currentStepId: currentRow.id,
+    allCompleted,
     history: messageRows.map((m): Turn => ({ role: m.role as Turn['role'], content: m.content })),
   }
 }

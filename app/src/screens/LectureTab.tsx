@@ -181,12 +181,18 @@ export function LectureTab({ course }: { course: Course }) {
       {state.streamError && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-center">
           <p className="text-sm text-amber-800">{state.streamError}</p>
-          <button
-            onClick={() => void start()}
-            className="mt-3 rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white transition hover:bg-slate-700"
-          >
-            続きを生成する
-          </button>
+          {/*
+            完了後は「続きを生成する」を出さない。押すと③講義本文の生成になり、
+            終えたはずの解説が再び流れるため（§4.2.4、Q-32）。質問の失敗は入力欄から送り直す
+          */}
+          {!allDone && (
+            <button
+              onClick={() => void start()}
+              className="mt-3 rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white transition hover:bg-slate-700"
+            >
+              続きを生成する
+            </button>
+          )}
         </div>
       )}
 
@@ -214,7 +220,10 @@ export function LectureTab({ course }: { course: Course }) {
       {allDone && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-center">
           <p className="text-sm font-semibold text-emerald-800">全ステップが完了しました</p>
-          <p className="mt-1 text-xs text-emerald-700">確認テストで理解度を測ってみてください</p>
+          {/* 完了後も入力欄は開いている（§4.2.4、Q-32）。それが分かる文面にする */}
+          <p className="mt-1 text-xs text-emerald-700">
+            まだわからないことがあれば、いつでも質問してください
+          </p>
           <button
             onClick={() => dispatch({ type: 'setTab', tab: 'quiz' })}
             className="mt-3 rounded-lg bg-emerald-700 px-4 py-2 text-xs font-medium text-white transition hover:bg-emerald-600"

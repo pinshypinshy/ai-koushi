@@ -51,6 +51,12 @@ async function handleTurn(c: Context<AppEnv>, courseId: string, question: string
     return c.json({ error: 'not_found', message: '受講できる状態ではありません' }, 404)
   }
 
+  // 完了済みの講義で通すのは④だけにする（§4.2.4、Q-32）。③まで通すと最後のステップの
+  // 解説がもう一度流れ、「全ステップが完了しました」の表示と食い違う
+  if (ctx.allCompleted && question === null) {
+    return c.json({ error: 'course_completed', message: '全ステップが完了しています' }, 409)
+  }
+
   const totals = await courseTokenTotals(c.env.DB, courseId)
   if (totals.input >= COURSE_INPUT_TOKEN_LIMIT || totals.output >= COURSE_OUTPUT_TOKEN_LIMIT) {
     return c.json(
@@ -73,6 +79,7 @@ async function handleTurn(c: Context<AppEnv>, courseId: string, question: string
     currentStep: ctx.currentStep,
     // 質問は turn プロンプト側で別に載せるため、履歴には含めない（二重に載る）
     history: ctx.history,
+    allCompleted: ctx.allCompleted,
   }
 
   c.header('content-type', 'application/x-ndjson; charset=utf-8')

@@ -10,7 +10,11 @@ export function PromptInput({ course }: { course: Course }) {
   const [text, setText] = useState('')
   // サンプルでは AI を呼ばないため、質問は受け付けない
   const demo = isDemo()
-  const disabled = course.currentStepId === null || running || demo
+  /**
+   * 全ステップ完了後も送信できる状態を保つ（§4.2.4、Q-32）。
+   * 講義を終えた後こそ聞きたいことが残るためで、受け取るのは質問応答（④）だけである
+   */
+  const disabled = running || demo || course.steps.length === 0
 
   const submit = () => {
     const t = text.trim()
@@ -34,13 +38,7 @@ export function PromptInput({ course }: { course: Course }) {
           rows={1}
           disabled={disabled}
           placeholder={
-            demo
-              ? 'サンプルでは質問できません'
-              : course.currentStepId === null
-                ? '講義が完了しました'
-                : running
-                  ? 'AIが応答しています…'
-                  : 'プロンプトを入力'
+            demo ? 'サンプルでは質問できません' : running ? 'AIが応答しています…' : 'プロンプトを入力'
           }
           className="max-h-32 min-h-[24px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
         />
