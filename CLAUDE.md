@@ -3,8 +3,8 @@
 参考書をアップロードすると、AIが学習に適したステップへ分解し、チャット形式の講義として
 解説する Web アプリ。個人利用の MVP。
 
-**設計上の判断はすべて [REQUIREMENTS.md](REQUIREMENTS.md) に記録されている。** 実装で迷ったら
-推測せずそちらを読む。決定事項と根拠は §10 に集約されている。README.md は現在の実装状況。
+**設計上の判断はすべて [REQUIREMENTS.md](docs/REQUIREMENTS.md) に記録されている。** 実装で迷ったら
+推測せずそちらを読む。決定事項と根拠は §10 に集約されている。README.md は普遍的な説明、[docs/PROGRESS.md](docs/PROGRESS.md) は現在の開発状況。
 
 ## 構成
 
