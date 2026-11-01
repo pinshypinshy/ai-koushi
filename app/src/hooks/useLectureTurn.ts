@@ -117,6 +117,8 @@ export function useLectureTurn(course: Course) {
   return {
     running,
     needsRegenerate,
+    /** 再生成で置き換える途切れた発言。回答の無い質問をやり直す場合は null */
+    replacingId,
     /** ③ ステップの解説を始める */
     start: useCallback(() => run({ kind: 'lecture' }), [run]),
     /** ④ 質問・応答を送る */

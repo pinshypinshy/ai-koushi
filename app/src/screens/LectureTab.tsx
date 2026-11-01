@@ -6,16 +6,61 @@ import type { Course, Message } from '../types'
 import { Markdown } from '../components/Markdown'
 import { IconUser } from '../components/Icons'
 
-function AssistantBubble({ children }: { children: React.ReactNode }) {
+/**
+ * AI の発話。footer は吹き出しの外、すぐ下に置く（途切れた旨と再生成の導線、§5.7）。
+ * children を渡さなければ吹き出しを描かず、アイコンと footer だけになる
+ * （回答が1文字も届かなかった質問の場合）。
+ */
+function AssistantBubble({
+  children,
+  footer,
+}: {
+  children?: React.ReactNode
+  footer?: React.ReactNode
+}) {
   return (
     <div className="flex gap-2.5">
       <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold text-white">
         AI
       </span>
-      <div className="min-w-0 max-w-[85%] rounded-2xl rounded-tl-sm border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-        {children}
+      <div className="flex min-w-0 max-w-[85%] flex-col">
+        {children !== undefined && (
+          <div className="rounded-2xl rounded-tl-sm border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+            {children}
+          </div>
+        )}
+        {footer && (
+          <div
+            className={`flex items-center gap-3 px-1 ${children !== undefined ? 'mt-1.5' : 'min-h-6'}`}
+          >
+            {footer}
+          </div>
+        )}
       </div>
     </div>
+  )
+}
+
+/** 途切れた応答・届かなかった応答の下に並べる文言と再生成ボタン（§5.7、Q-33） */
+function FailedReplyFooter({
+  label,
+  onRegenerate,
+}: {
+  label: string
+  onRegenerate?: () => void
+}) {
+  return (
+    <>
+      <span className="text-xs text-amber-700">{label}</span>
+      {onRegenerate && (
+        <button
+          onClick={onRegenerate}
+          className="shrink-0 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-700"
+        >
+          再生成する
+        </button>
+      )}
+    </>
   )
 }
 
@@ -23,7 +68,14 @@ function AssistantBubble({ children }: { children: React.ReactNode }) {
  * 受信中は state が頻繁に変わる。確定済みの発話まで描き直すと
  * 数式の組版をやり直すことになり、表示がかくつく原因になる。
  */
-const Bubble = memo(function Bubble({ message }: { message: Message }) {
+const Bubble = memo(function Bubble({
+  message,
+  onRegenerate,
+}: {
+  message: Message
+  /** 再生成の対象（現在のステップの最後の途切れた発言）にだけ渡す */
+  onRegenerate?: () => void
+}) {
   if (message.role === 'user') {
     return (
       <div className="flex justify-end gap-2.5">
@@ -35,14 +87,15 @@ const Bubble = memo(function Bubble({ message }: { message: Message }) {
     )
   }
   return (
-    <AssistantBubble>
+    <AssistantBubble
+      // 完了した発言と見分けられるようにする（§5.7、Q-33）。本文だけでは途中で切れたと分からない
+      footer={
+        message.interrupted && (
+          <FailedReplyFooter label="応答が途中で途切れました" onRegenerate={onRegenerate} />
+        )
+      }
+    >
       <Markdown>{message.content}</Markdown>
-      {/* 完了した発言と見分けられるようにする（§5.7、Q-33）。本文だけでは途中で切れたと分からない */}
-      {message.interrupted && (
-        <p className="mt-2 border-t border-slate-100 pt-2 text-xs text-amber-700">
-          応答が途中で途切れました
-        </p>
-      )}
     </AssistantBubble>
   )
 })
@@ -58,7 +111,9 @@ let savedScroll: { courseId: string; top: number } | null = null
 /** SC-07 講義タブ（§4.2） */
 export function LectureTab({ course }: { course: Course }) {
   const { state, dispatch } = useStore()
-  const { running, start, regenerate, needsRegenerate } = useLectureTurn(course)
+  const { running, start, regenerate, needsRegenerate, replacingId } = useLectureTurn(course)
+  /** 再生成の導線を出すか。受信中は出さない（二重に押されるのを防ぐ） */
+  const canRegenerate = needsRegenerate && !running
   const rootRef = useRef<HTMLDivElement>(null)
   const scrollerRef = useRef<HTMLElement | null>(null)
   /** 末尾に貼り付いているか。新しい発話で追従するかの判断に使う */
@@ -169,10 +224,23 @@ export function LectureTab({ course }: { course: Course }) {
                 <span className="h-px flex-1 bg-slate-200" />
               </div>
             )}
-            <Bubble message={m} />
+            <Bubble
+              message={m}
+              onRegenerate={canRegenerate && m.id === replacingId ? regenerate : undefined}
+            />
           </div>
         )
       })}
+
+      {/*
+        回答が1文字も届かなかった質問。置き換える吹き出しが無いため、AI のアイコンだけを出し、
+        途切れた発言と同じ位置に文言と再生成ボタンを並べる（§5.7、Q-33）
+      */}
+      {canRegenerate && replacingId === null && (
+        <AssistantBubble
+          footer={<FailedReplyFooter label="応答を取得できませんでした" onRegenerate={regenerate} />}
+        />
+      )}
 
       {/* 受信中の発話。届いた文字をそのまま表示する（§8.1） */}
       {state.streaming && (
@@ -187,19 +255,15 @@ export function LectureTab({ course }: { course: Course }) {
       )}
 
       {/*
-        失敗の表示は、その場の失敗（streamError）だけでなく、DB に残った状態からも出す。
-        前者だけだと、再読み込みや講義の切り替えで再生成の導線が消える（§5.7、Q-33）
+        再生成の導線を発言の下に出せない失敗だけを枠で示す。解説が1文字も届かなかった場合
+        （空のステップ）や、講義単位の上限で断られた場合など。発言の下に出せる場合は枠を
+        重ねない。同じ失敗を2か所で示すことになるため（§5.7、Q-33）
       */}
-      {!running && (state.streamError || needsRegenerate) && (
+      {!running && state.streamError && !needsRegenerate && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-center">
-          <p className="text-sm text-amber-800">
-            {state.streamError ?? '応答を最後まで受け取れませんでした'}
-          </p>
-          {/*
-            解説が1文字も届かずに失敗した場合は発言が残らないため、空のステップも対象にする。
-            何をやり直すかはサーバーが決める（regeneratePlan）
-          */}
-          {(needsRegenerate || (!allDone && !hasMessages)) && (
+          <p className="text-sm text-amber-800">{state.streamError}</p>
+          {/* 何をやり直すかはサーバーが決める（regeneratePlan）。空のステップなら③を最初から */}
+          {!allDone && !hasMessages && (
             <button
               onClick={() => void regenerate()}
               className="mt-3 rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white transition hover:bg-slate-700"
