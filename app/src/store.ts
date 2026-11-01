@@ -42,6 +42,11 @@ export type MenuState =
 export interface StreamingState {
   stepId: string
   text: string
+  /**
+   * 再生成（§5.7、Q-33）で置き換える途切れた発言。受信中はこれを隠す。
+   * 残すと途中までの解説と受信中の解説が上下に並び、同じ内容が二重に見える
+   */
+  replacingId: string | null
 }
 
 export interface State {
@@ -149,7 +154,7 @@ export type Action =
   | { type: 'renameCourse'; courseId: string; title: string }
   // 受講（③④）
   | { type: 'messageAppended'; courseId: string; message: Message }
-  | { type: 'streamStart'; stepId: string }
+  | { type: 'streamStart'; stepId: string; replacingId?: string | null }
   | { type: 'streamDelta'; text: string }
   | { type: 'streamEnd' }
   | { type: 'streamFailed'; message: string }
@@ -348,12 +353,20 @@ export function reducer(s: State, action: Action): State {
         ...s,
         courses: updateCourse(s, action.courseId, (c) => ({
           ...c,
-          messages: [...c.messages, action.message],
+          // 再生成（§5.7、Q-33）は途切れた発言を同じ id のまま置き換えて返す。
+          // 末尾に足すと、置き換え前の発言と並んで二重に表示される
+          messages: c.messages.some((m) => m.id === action.message.id)
+            ? c.messages.map((m) => (m.id === action.message.id ? action.message : m))
+            : [...c.messages, action.message],
           updatedAt: action.message.createdAt,
         })),
       }
     case 'streamStart':
-      return { ...s, streaming: { stepId: action.stepId, text: '' }, streamError: null }
+      return {
+        ...s,
+        streaming: { stepId: action.stepId, text: '', replacingId: action.replacingId ?? null },
+        streamError: null,
+      }
     case 'streamDelta':
       return s.streaming
         ? { ...s, streaming: { ...s.streaming, text: s.streaming.text + action.text } }

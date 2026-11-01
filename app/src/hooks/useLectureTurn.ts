@@ -21,14 +21,37 @@ export function useLectureTurn(course: Course) {
   const allCompleted = course.currentStepId === null
   const stepId = course.currentStepId ?? course.steps[course.steps.length - 1]?.id ?? null
 
+  /**
+   * 応答が欠けたまま終わっているか（§5.7、Q-33）。
+   * 最後の発言が途切れた応答か、回答の付いていない質問なら、再生成の導線を出す。
+   * 何をやり直すか（③か④か）はサーバーが決めるため、ここでは出すかどうかだけを見る
+   */
+  const stepMessages = course.messages.filter((m) => m.stepId === stepId)
+  const last = stepMessages.at(-1) ?? null
+  const answersQuestion =
+    last?.role === 'user' || (last?.interrupted === true && stepMessages.at(-2)?.role === 'user')
+  /**
+   * 完了後は④のやり直しに限る。③は完了後に受け付けないため（Q-32）、
+   * 講義本文の途切れを再生成しようとしてもサーバーが 409 を返すだけになる
+   */
+  const needsRegenerate =
+    last !== null &&
+    (last.role === 'user' || last.interrupted) &&
+    (!allCompleted || answersQuestion)
+
   const run = useCallback(
-    async (question: string | null) => {
+    async (turn: TurnRequest) => {
       if (!stepId || running) return
       // 完了後に受け付けるのは質問（④）だけ。講義本文（③）を送るとサーバーでも 409 になり、
       // 「全ステップが完了しました」の表示の下に解説が再び流れてしまう（Q-32）
-      if (question === null && allCompleted) return
-      dispatch({ type: 'streamStart', stepId })
+      if (turn.kind === 'lecture' && allCompleted) return
+      dispatch({
+        type: 'streamStart',
+        stepId,
+        replacingId: turn.kind === 'regenerate' ? turn.replacingId : null,
+      })
       try {
+        const question = turn.kind === 'question' ? turn.text : null
         if (question !== null) {
           // 送信した発言はすぐ画面に出す。サーバー側でも保存され、
           // 講義を取り直した時点で正式な id を持つものに置き換わる
@@ -41,6 +64,7 @@ export function useLectureTurn(course: Course) {
               role: 'user',
               content: question,
               createdAt: Date.now(),
+              interrupted: false,
             },
           })
         }
@@ -59,9 +83,7 @@ export function useLectureTurn(course: Course) {
         }
 
         const saved = await streamTurn(
-          question === null
-            ? `/api/courses/${course.id}/lecture`
-            : `/api/courses/${course.id}/messages`,
+          `/api/courses/${course.id}/${TURN_PATHS[turn.kind]}`,
           question === null ? null : { text: question },
           (text) => {
             buffered += text
@@ -90,11 +112,27 @@ export function useLectureTurn(course: Course) {
     [course.id, stepId, allCompleted, running, dispatch, refreshUsage],
   )
 
+  const replacingId = last?.role === 'assistant' && last.interrupted ? last.id : null
+
   return {
     running,
+    needsRegenerate,
     /** ③ ステップの解説を始める */
-    start: useCallback(() => run(null), [run]),
+    start: useCallback(() => run({ kind: 'lecture' }), [run]),
     /** ④ 質問・応答を送る */
-    send: useCallback((text: string) => run(text), [run]),
+    send: useCallback((text: string) => run({ kind: 'question', text }), [run]),
+    /** 途中で失敗した③④をやり直す（§5.7、Q-33） */
+    regenerate: useCallback(() => run({ kind: 'regenerate', replacingId }), [run, replacingId]),
   }
+}
+
+type TurnRequest =
+  | { kind: 'lecture' }
+  | { kind: 'question'; text: string }
+  | { kind: 'regenerate'; replacingId: string | null }
+
+const TURN_PATHS: Record<TurnRequest['kind'], string> = {
+  lecture: 'lecture',
+  question: 'messages',
+  regenerate: 'regenerate',
 }

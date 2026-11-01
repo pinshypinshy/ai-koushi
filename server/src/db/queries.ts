@@ -48,6 +48,7 @@ interface MessageRow {
   role: string
   content: string
   created_at: number
+  interrupted: number
 }
 
 /** key_points は JSON 文字列で格納されている（§6.2）。壊れていても講義全体を落とさない */
@@ -126,7 +127,7 @@ export async function getCourseDetail(
       .bind(courseId, userId),
     db
       .prepare(
-        `SELECT m.id, m.step_id, m.role, m.content, m.created_at
+        `SELECT m.id, m.step_id, m.role, m.content, m.created_at, m.interrupted
          FROM messages m
          JOIN steps s ON s.id = m.step_id
          JOIN courses c ON c.id = s.course_id
@@ -147,6 +148,7 @@ export async function getCourseDetail(
       role: row.role as ApiMessage['role'],
       content: row.content,
       createdAt: row.created_at,
+      interrupted: row.interrupted === 1,
     }),
   )
 
@@ -464,8 +466,21 @@ export interface LectureContextRow {
   currentStep: OutlineStep
   currentStepId: string
   history: Turn[]
+  /**
+   * history の元になった発言。再生成（§5.7、Q-33）で③か④か、どこまでを履歴に
+   * 載せるか、どの発言を置き換えるかを決めるために使う
+   */
+  stepMessages: StoredMessage[]
   /** 全ステップ完了後か（§4.2.4、Q-32）。③を止め④だけを通す判断に使う */
   allCompleted: boolean
+}
+
+export interface StoredMessage {
+  id: string
+  role: Turn['role']
+  content: string
+  createdAt: number
+  interrupted: boolean
 }
 
 /**
@@ -523,10 +538,20 @@ export async function loadLectureContext(
 
   const { results: messageRows } = await db
     .prepare(
-      'SELECT role, content FROM messages WHERE step_id = ?1 ORDER BY created_at, rowid',
+      `SELECT id, role, content, created_at, interrupted
+       FROM messages WHERE step_id = ?1 ORDER BY created_at, rowid`,
     )
     .bind(currentRow.id)
-    .all<{ role: string; content: string }>()
+    .all<{ id: string; role: string; content: string; created_at: number; interrupted: number }>()
+  const stepMessages = messageRows.map(
+    (m): StoredMessage => ({
+      id: m.id,
+      role: m.role as Turn['role'],
+      content: m.content,
+      createdAt: m.created_at,
+      interrupted: m.interrupted === 1,
+    }),
+  )
 
   return {
     material,
@@ -541,7 +566,8 @@ export async function loadLectureContext(
     currentStep: toOutline(currentRow),
     currentStepId: currentRow.id,
     allCompleted,
-    history: messageRows.map((m): Turn => ({ role: m.role as Turn['role'], content: m.content })),
+    history: stepMessages.map((m): Turn => ({ role: m.role, content: m.content })),
+    stepMessages,
   }
 }
 
@@ -556,6 +582,7 @@ export async function insertMessage(
   stepId: string,
   role: ApiMessage['role'],
   content: string,
+  interrupted = false,
 ): Promise<ApiMessage> {
   const message: ApiMessage = {
     id: crypto.randomUUID(),
@@ -563,13 +590,15 @@ export async function insertMessage(
     role,
     content,
     createdAt: Date.now(),
+    interrupted,
   }
   await db.batch([
     db
       .prepare(
-        `INSERT INTO messages (id, step_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4, ?5)`,
+        `INSERT INTO messages (id, step_id, role, content, created_at, interrupted)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
       )
-      .bind(message.id, stepId, role, content, message.createdAt),
+      .bind(message.id, stepId, role, content, message.createdAt, interrupted ? 1 : 0),
     db
       .prepare(
         `UPDATE steps SET status = 'in_progress' WHERE id = ?1 AND status = 'not_started'`,
@@ -578,6 +607,41 @@ export async function insertMessage(
     db.prepare('UPDATE courses SET updated_at = ?2 WHERE id = ?1').bind(courseId, message.createdAt),
   ])
   return message
+}
+
+/**
+ * 再生成（§5.7、Q-33）の結果で、途切れた発言を置き換える。
+ *
+ * id と created_at を保つのは、④の再生成で質問の直後という並びを崩さないため。
+ * 再生成がまた途中で失敗した場合は、届いた分が前回より長いときだけ置き換える。
+ * 短い方で上書きすると、既に読めていた部分が消えるため（§5.7「部分生成分を保存」）。
+ */
+export async function replaceInterruptedMessage(
+  db: D1Database,
+  courseId: string,
+  stepId: string,
+  target: StoredMessage,
+  content: string,
+  interrupted: boolean,
+): Promise<ApiMessage> {
+  const now = Date.now()
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE messages SET content = ?2, interrupted = ?3
+         WHERE id = ?1 AND (?3 = 0 OR length(content) < length(?2))`,
+      )
+      .bind(target.id, content, interrupted ? 1 : 0),
+    db.prepare('UPDATE courses SET updated_at = ?2 WHERE id = ?1').bind(courseId, now),
+  ])
+  return {
+    id: target.id,
+    stepId,
+    role: 'assistant',
+    content,
+    createdAt: target.createdAt,
+    interrupted,
+  }
 }
 
 /**

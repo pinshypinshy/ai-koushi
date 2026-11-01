@@ -53,6 +53,11 @@ export interface ApiMessage {
   role: MessageRole
   content: string
   createdAt: number
+  /**
+   * 応答の生成が途中で失敗し、届いた分だけを保存した発言か（§5.7、Q-33）。
+   * 画面はこれを見て再生成の導線を出す。再生成が成功すると同じ id のまま置き換わる
+   */
+  interrupted: boolean
 }
 
 /** 選択中の講義。講義タブの描画に必要な分だけを持つ */

@@ -37,6 +37,12 @@ const Bubble = memo(function Bubble({ message }: { message: Message }) {
   return (
     <AssistantBubble>
       <Markdown>{message.content}</Markdown>
+      {/* 完了した発言と見分けられるようにする（§5.7、Q-33）。本文だけでは途中で切れたと分からない */}
+      {message.interrupted && (
+        <p className="mt-2 border-t border-slate-100 pt-2 text-xs text-amber-700">
+          応答が途中で途切れました
+        </p>
+      )}
     </AssistantBubble>
   )
 })
@@ -52,7 +58,7 @@ let savedScroll: { courseId: string; top: number } | null = null
 /** SC-07 講義タブ（§4.2） */
 export function LectureTab({ course }: { course: Course }) {
   const { state, dispatch } = useStore()
-  const { running, start } = useLectureTurn(course)
+  const { running, start, regenerate, needsRegenerate } = useLectureTurn(course)
   const rootRef = useRef<HTMLDivElement>(null)
   const scrollerRef = useRef<HTMLElement | null>(null)
   /** 末尾に貼り付いているか。新しい発話で追従するかの判断に使う */
@@ -149,6 +155,8 @@ export function LectureTab({ course }: { course: Course }) {
   return (
     <div ref={rootRef} className="mx-auto w-full max-w-3xl space-y-5 px-4 py-4">
       {course.messages.map((m) => {
+        // 再生成の受信中は置き換え前の発言を隠す。受信中の発言と同じ内容が二重に並ぶため
+        if (m.id === state.streaming?.replacingId) return null
         const s = course.steps.find((x) => x.id === m.stepId)
         return (
           <div key={m.id} className="space-y-5">
@@ -178,29 +186,36 @@ export function LectureTab({ course }: { course: Course }) {
         </AssistantBubble>
       )}
 
-      {state.streamError && (
+      {/*
+        失敗の表示は、その場の失敗（streamError）だけでなく、DB に残った状態からも出す。
+        前者だけだと、再読み込みや講義の切り替えで再生成の導線が消える（§5.7、Q-33）
+      */}
+      {!running && (state.streamError || needsRegenerate) && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-center">
-          <p className="text-sm text-amber-800">{state.streamError}</p>
+          <p className="text-sm text-amber-800">
+            {state.streamError ?? '応答を最後まで受け取れませんでした'}
+          </p>
           {/*
-            完了後は「続きを生成する」を出さない。押すと③講義本文の生成になり、
-            終えたはずの解説が再び流れるため（§4.2.4、Q-32）。質問の失敗は入力欄から送り直す
+            解説が1文字も届かずに失敗した場合は発言が残らないため、空のステップも対象にする。
+            何をやり直すかはサーバーが決める（regeneratePlan）
           */}
-          {!allDone && (
+          {(needsRegenerate || (!allDone && !hasMessages)) && (
             <button
-              onClick={() => void start()}
+              onClick={() => void regenerate()}
               className="mt-3 rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white transition hover:bg-slate-700"
             >
-              続きを生成する
+              再生成する
             </button>
           )}
         </div>
       )}
 
       {/*
-        「次のステップへ進む」は常に出す。ステップ完了はユーザーが次へ進むことに
-        同意した時点であり（Q-4）、判断は本人に委ねられているため。
+        「次のステップへ進む」は失敗の表示中も出す。ステップ完了はユーザーが次へ進むことに
+        同意した時点であり（Q-4）、判断は本人に委ねられているため。隠すと、生成が失敗し
+        続ける場合に先へ進めなくなる
       */}
-      {!allDone && !running && !state.streamError && hasMessages && (
+      {!allDone && !running && hasMessages && (
         <div className="flex flex-col items-center gap-2 pt-2">
           <button
             onClick={() => void complete()}

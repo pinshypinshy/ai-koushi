@@ -65,6 +65,7 @@ function createSession(): Session {
         role: 'assistant',
         content: s.script[0],
         createdAt: Date.now() - (2 - i) * 60_000,
+        interrupted: false,
       },
       {
         id: `demo-m-${i}-1`,
@@ -72,6 +73,7 @@ function createSession(): Session {
         role: 'user',
         content: 'なるほど、理解できました。',
         createdAt: Date.now() - (2 - i) * 60_000 + 1000,
+        interrupted: false,
       },
     )
     cursor[id] = 1
@@ -219,6 +221,7 @@ export async function demoStreamTurn(
     role: 'assistant',
     content,
     createdAt: Date.now(),
+    interrupted: false,
   }
   if (question === null) s.cursor[id] = used + 1
   s.messages = [...s.messages, message]
